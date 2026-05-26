@@ -7,6 +7,7 @@ import { In, Repository } from 'typeorm';
 import { randomUUID } from 'crypto';
 import { TokenEntity } from 'src/db/entities/token.entity';
 import { TokenTypeEnum } from 'src/common/enums/token-type.enum';
+import { MailService } from 'src/mail/mail.service';
 
 @Injectable()
 export class UsersService {
@@ -16,7 +17,9 @@ export class UsersService {
         private readonly usersRepository: Repository<UserEntity>,
 
         @InjectRepository(TokenEntity)
-        private readonly tokenRepository: Repository<TokenEntity>
+        private readonly tokenRepository: Repository<TokenEntity>,
+
+        private readonly mailService: MailService
     ) {}
     
     async create(newUser: UserDto) {
@@ -33,7 +36,7 @@ export class UsersService {
         dbUser.password = hashSync(newUser.password, 10)
         dbUser.role = newUser.role
         
-        const {id, username} = await this.usersRepository.save(dbUser)
+        const {id, username, email} = await this.usersRepository.save(dbUser)
         
         const tokenEntity = new TokenEntity()
         tokenEntity.userId = id
@@ -42,6 +45,9 @@ export class UsersService {
         tokenEntity.expiresAt = new Date(Date.now() + 1000 * 60 * 10)
         
         await this.tokenRepository.save(tokenEntity)
+        
+        await this.mailService.sendVerificationEmail(email, username, tokenEntity.token)
+
         
         return {id, username}
     }
