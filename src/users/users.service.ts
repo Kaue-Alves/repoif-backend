@@ -3,14 +3,20 @@ import { UserDto } from './users.dto';
 import { hashSync } from 'bcrypt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { UserEntity } from 'src/db/entities/user.entity';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
+import { randomUUID } from 'crypto';
+import { TokenEntity } from 'src/db/entities/token.entity';
+import { TokenTypeEnum } from 'src/common/enums/token-type.enum';
 
 @Injectable()
 export class UsersService {
 
     constructor(
         @InjectRepository(UserEntity)
-        private readonly usersRepository: Repository<UserEntity>
+        private readonly usersRepository: Repository<UserEntity>,
+
+        @InjectRepository(TokenEntity)
+        private readonly tokenRepository: Repository<TokenEntity>
     ) {}
     
     async create(newUser: UserDto) {
@@ -28,6 +34,15 @@ export class UsersService {
         dbUser.role = newUser.role
         
         const {id, username} = await this.usersRepository.save(dbUser)
+        
+        const tokenEntity = new TokenEntity()
+        tokenEntity.userId = id
+        tokenEntity.token = randomUUID()
+        tokenEntity.type = TokenTypeEnum.EMAIL_VERIFICATION
+        tokenEntity.expiresAt = new Date(Date.now() + 1000 * 60 * 10)
+        
+        await this.tokenRepository.save(tokenEntity)
+        
         return {id, username}
     }
 
@@ -48,7 +63,8 @@ export class UsersService {
             username: userFound.username,
             email: userFound.email,
             password: userFound.password,
-            role: userFound.role
+            role: userFound.role,
+            emailVerified: userFound.emailVerified
         }
 
         

@@ -19,4 +19,7 @@ export class UserEntity {
 
     @Column({ type: 'varchar', length: 50, default: UserRoleEnum.STUDENT })
     role!: UserRoleEnum
+
+    @Column({type: 'boolean', default: false})
+    emailVerified!: boolean;
 }
