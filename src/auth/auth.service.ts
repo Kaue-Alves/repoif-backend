@@ -26,12 +26,28 @@ export class AuthService {
         this.jwtExpirationTimeInSeconds = expirationTimeInSeconds;
     }
     
+    async verifyEmail(token: string) {
+        await this.usersService.verifyEmail(token);
+    }
+
+    async forgotPassword(email: string): Promise<void> {
+        await this.usersService.requestPasswordReset(email);
+    }
+
+    async resetPassword(token: string, newPassword: string): Promise<void> {
+        await this.usersService.resetPassword(token, newPassword);
+    }
+    
     async signIn(username: string, email: string,password: string): Promise<AuthResponseDto> {
 
-        const foundUser = await this.usersService.findByUsername(username)
+        const foundUser = await this.usersService.findByUsername(username.trim())
 
-        if (!foundUser || !compareSync(password, foundUser.password)) {
+        if (!foundUser || !compareSync(password.trim(), foundUser.password)) {
             throw new UnauthorizedException();
+        }
+
+        if (!foundUser.emailVerified) {
+            throw new UnauthorizedException('Email not verified');
         }
 
         const payload = {sub: foundUser.id, username: foundUser.username, email: foundUser.email, role: foundUser.role};

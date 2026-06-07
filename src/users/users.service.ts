@@ -1,9 +1,9 @@
-import { ConflictException, Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
 import { UserDto } from './users.dto';
 import { hashSync } from 'bcrypt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { UserEntity } from 'src/db/entities/user.entity';
-import { In, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 import { randomUUID } from 'crypto';
 import { TokenEntity } from 'src/db/entities/token.entity';
 import { TokenTypeEnum } from 'src/common/enums/token-type.enum';
@@ -31,9 +31,9 @@ export class UsersService {
         }
         
         const dbUser = new UserEntity()
-        dbUser.username = newUser.username
-        dbUser.email = newUser.email
-        dbUser.password = hashSync(newUser.password, 10)
+        dbUser.username = newUser.username.trim()
+        dbUser.email = newUser.email.trim()
+        dbUser.password = hashSync(newUser.password.trim(), 10)
         dbUser.role = newUser.role
         
         const {id, username, email} = await this.usersRepository.save(dbUser)
@@ -42,13 +42,12 @@ export class UsersService {
         tokenEntity.userId = id
         tokenEntity.token = randomUUID()
         tokenEntity.type = TokenTypeEnum.EMAIL_VERIFICATION
-        tokenEntity.expiresAt = new Date(Date.now() + 1000 * 60 * 10)
+        tokenEntity.expiresAt = new Date(Date.now() + 1000 * 60 * 10) // token expires in 10 minutes
         
         await this.tokenRepository.save(tokenEntity)
         
         await this.mailService.sendVerificationEmail(email, username, tokenEntity.token)
 
-        
         return {id, username}
     }
 
@@ -74,5 +73,119 @@ export class UsersService {
         }
 
         
+    }
+
+    async verifyEmail(token: string): Promise<void> {
+
+        const normalizedToken = token?.trim();
+        if (!normalizedToken) {
+            throw new BadRequestException('Token é obrigatório');
+        }
+
+        const tokenEntity = await this.tokenRepository.findOne({
+            where: {
+                token: normalizedToken,
+                type: TokenTypeEnum.EMAIL_VERIFICATION,
+            },
+        });
+
+        if (!tokenEntity) {
+            throw new BadRequestException('Token inválido');
+        }
+
+        if (tokenEntity.expiresAt.getTime() < Date.now()) {
+            await this.tokenRepository.delete({ id: tokenEntity.id });
+            throw new BadRequestException('Token expirado');
+        }
+
+        const user = await this.usersRepository.findOne({ where: { id: tokenEntity.userId } });
+        if (!user) {
+            await this.tokenRepository.delete({ id: tokenEntity.id });
+            throw new BadRequestException('Usuário não encontrado');
+        }
+
+        if (!user.emailVerified) {
+            user.emailVerified = true;
+            await this.usersRepository.save(user);
+        }
+
+        await this.tokenRepository.delete({
+            userId: user.id,
+            type: TokenTypeEnum.EMAIL_VERIFICATION,
+        });
+    }
+
+    async requestPasswordReset(email: string): Promise<void> {
+        const normalizedEmail = email?.trim();
+        if (!normalizedEmail) {
+            throw new BadRequestException('Email é obrigatório');
+        }
+
+        const user = await this.usersRepository.findOne({ where: { email: normalizedEmail } });
+
+        // Não revelar se o usuário existe
+        if (!user) {
+            return;
+        }
+
+        // Invalida tokens antigos de redefinição
+        await this.tokenRepository.delete({
+            userId: user.id,
+            type: TokenTypeEnum.PASSWORD_RESET,
+        });
+
+        const tokenEntity = new TokenEntity();
+        tokenEntity.userId = user.id;
+        tokenEntity.token = randomUUID();
+        tokenEntity.type = TokenTypeEnum.PASSWORD_RESET;
+        tokenEntity.expiresAt = new Date(Date.now() + 1000 * 60 * 10); // 10 minutos
+
+        await this.tokenRepository.save(tokenEntity);
+        await this.mailService.sendPasswordResetEmail(user.email, user.username, tokenEntity.token);
+    }
+
+    async resetPassword(token: string, newPassword: string): Promise<void> {
+        const normalizedToken = token?.trim();
+        const normalizedPassword = newPassword?.trim();
+
+        if (!normalizedToken) {
+            throw new BadRequestException('Token é obrigatório');
+        }
+
+        if (!normalizedPassword) {
+            throw new BadRequestException('Nova senha é obrigatória');
+        }
+
+        if (normalizedPassword.length < 8) {
+            throw new BadRequestException('A senha deve ter no mínimo 8 caracteres');
+        }
+
+        const tokenEntity = await this.tokenRepository.findOne({
+            where: {
+                token: normalizedToken,
+                type: TokenTypeEnum.PASSWORD_RESET,
+            },
+        });
+
+        if (!tokenEntity) {
+            throw new BadRequestException('Token inválido');
+        }
+
+        if (tokenEntity.expiresAt.getTime() < Date.now()) {
+            await this.tokenRepository.delete({ id: tokenEntity.id });
+            throw new BadRequestException('Token expirado');
+        }
+
+        const user = await this.usersRepository.findOne({ where: { id: tokenEntity.userId } });
+        if (!user) {
+            await this.tokenRepository.delete({ id: tokenEntity.id });
+            throw new BadRequestException('Usuário não encontrado');
+        }
+
+        user.password = hashSync(normalizedPassword, 10);
+        await this.usersRepository.save(user);
+
+        // one-time use
+        await this.tokenRepository.delete({ id: tokenEntity.id });
     }
 }

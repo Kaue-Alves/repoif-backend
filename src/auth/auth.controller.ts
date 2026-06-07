@@ -1,4 +1,4 @@
-import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Post, Query } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { AuthResponseDto } from './auth.dto';
 
@@ -17,5 +17,27 @@ export class AuthController {
 
         return await this.authService.signIn(username, email, password)
         
+    }
+
+    @Get('verify-email')
+    async verifyEmail(@Query('token') token: string) {
+        await this.authService.verifyEmail(token)
+    }
+
+    @HttpCode(HttpStatus.OK)
+    @Post('forgot-password')
+    async forgotPassword(@Body('email') email: string) {
+        await this.authService.forgotPassword(email);
+        return { message: 'Se o email existir, enviaremos instruções de redefinição.' };
+    }
+
+    @HttpCode(HttpStatus.OK)
+    @Post('reset-password')
+    async resetPassword(
+        @Body('token') token: string,
+        @Body('newPassword') newPassword: string,
+    ) {
+        await this.authService.resetPassword(token, newPassword);
+        return { message: 'Senha redefinida com sucesso' };
     }
 }
