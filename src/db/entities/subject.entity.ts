@@ -15,6 +15,9 @@ export class SubjectEntity {
     @Column({ type: 'uuid' })
     teacherId!: string;
 
+    @Column({ type: 'boolean', default: false })
+    isPublic!: boolean;
+
     @CreateDateColumn({ name: 'created_at', type: 'timestamp' })
     createdAt!: Date;
 

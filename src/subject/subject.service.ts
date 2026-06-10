@@ -26,17 +26,26 @@ async create(subjectDto: SubjectDto, teacherId: string): Promise<SubjectEntity> 
     subject.name = subjectDto.name;
     subject.description = subjectDto.description;
     subject.teacherId = teacherId;
+    subject.isPublic = subjectDto.isPublic ?? false;
 
     return await this.subjectRepository.save(subject);
 }
 
 
-    async findAll(): Promise<SubjectEntity[]> {
-        return await this.subjectRepository.find();
+    async findAll(teacherId: string): Promise<SubjectEntity[]> {
+        return await this.subjectRepository.find({ where: { teacherId } });
     }
 
-    async findOne(id: string): Promise<SubjectEntity> {
-        const subject = await this.subjectRepository.findOne({ where: { id } });
+    async findByTeacherId(teacherId: string, isOwner: boolean): Promise<SubjectEntity[]> {
+        const query: any = { teacherId };
+        if (!isOwner) {
+            query.isPublic = true;
+        }
+        return await this.subjectRepository.find({ where: query });
+    }
+
+    async findOne(id: string, teacherId: string): Promise<SubjectEntity> {
+        const subject = await this.subjectRepository.findOne({ where: { id, teacherId } });
         if (!subject) {
             throw new NotFoundException(`Subject with ID ${id} not found`);
         }
@@ -44,7 +53,7 @@ async create(subjectDto: SubjectDto, teacherId: string): Promise<SubjectEntity> 
     }
 
     async update(id: string, subjectDto: Partial<SubjectDto>, teacherId: string): Promise<SubjectEntity> {
-        const subject = await this.findOne(id);
+        const subject = await this.findOne(id, teacherId);
 
         // Opcional: Validar se o professor que está tentando editar é o dono da disciplina
         if (subject.teacherId !== teacherId) {
@@ -53,6 +62,7 @@ async create(subjectDto: SubjectDto, teacherId: string): Promise<SubjectEntity> 
         
         if (subjectDto.name) subject.name = subjectDto.name;
         if (subjectDto.description) subject.description = subjectDto.description;
+        if (subjectDto.isPublic !== undefined) subject.isPublic = subjectDto.isPublic;
         
         // teacherId não é atualizado via body, ele é fixo do dono original ou alterado por lógica específica
         // mas se quiser permitir trocar de professor (ex: admin), a lógica seria diferente.
@@ -60,8 +70,15 @@ async create(subjectDto: SubjectDto, teacherId: string): Promise<SubjectEntity> 
         return await this.subjectRepository.save(subject);
     }
 
-    async remove(id: string): Promise<void> {
+    async remove(id: string, teacherId: string): Promise<void> {
+        const subject = await this.findOne(id, teacherId);
+
+        if (subject.teacherId !== teacherId) {
+            throw new NotFoundException(`Subject with ID ${id} not found for this teacher`);
+        }
+
         const result = await this.subjectRepository.delete(id);
+
         if (result.affected === 0) {
             throw new NotFoundException(`Subject with ID ${id} not found`);
         }

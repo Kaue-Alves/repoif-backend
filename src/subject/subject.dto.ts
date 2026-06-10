@@ -17,6 +17,9 @@ export class SubjectDto {
     @IsOptional()
     teacherId!: string;
 
+    @IsOptional()
+    isPublic?: boolean;
+
     @IsDate()
     @IsOptional()
     createdAt!: Date;

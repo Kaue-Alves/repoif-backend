@@ -15,9 +15,9 @@ import { UsersModule } from 'src/users/users.module';
       signOptions: {
         expiresIn: (() => {
           const expirationTime = configService.get<string>('JWT_EXPIRATION_TIME');
-          const expirationTimeInSeconds = Number(expirationTime);
+          const expirationTimeInSeconds = parseInt(expirationTime ?? '', 10);
 
-          if (!Number.isFinite(expirationTimeInSeconds) || expirationTimeInSeconds <= 0) {
+          if (isNaN(expirationTimeInSeconds) || expirationTimeInSeconds <= 0) {
             throw new Error(
               `JWT_EXPIRATION_TIME inválido: "${expirationTime}". Use um número > 0 (em segundos).`,
             );

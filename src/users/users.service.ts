@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { UserDto } from './users.dto';
 import { hashSync } from 'bcrypt';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -8,6 +8,7 @@ import { randomUUID } from 'crypto';
 import { TokenEntity } from 'src/db/entities/token.entity';
 import { TokenTypeEnum } from 'src/common/enums/token-type.enum';
 import { MailService } from 'src/mail/mail.service';
+import { SubjectService } from 'src/subject/subject.service';
 
 @Injectable()
 export class UsersService {
@@ -19,7 +20,9 @@ export class UsersService {
         @InjectRepository(TokenEntity)
         private readonly tokenRepository: Repository<TokenEntity>,
 
-        private readonly mailService: MailService
+        private readonly mailService: MailService,
+
+        private readonly subjectService: SubjectService
     ) {}
     
     async create(newUser: UserDto) {
@@ -53,6 +56,28 @@ export class UsersService {
 
     async findAllUsers(): Promise<UserDto[] | null> {
         return await this.usersRepository.find()
+    }
+
+    async getProfile(username: string, requestingUserId?: string) {
+        const user = await this.usersRepository.findOne({ where: { username } });
+
+        if (!user) {
+            throw new NotFoundException(`User ${username} not found`);
+        }
+
+        const isOwner = requestingUserId === user.id;
+        const subjects = await this.subjectService.findByTeacherId(user.id, isOwner);
+
+        return {
+            username: user.username,
+            role: user.role,
+            subjects: subjects.map(s => ({
+                id: s.id,
+                name: s.name,
+                description: s.description,
+                isPublic: s.isPublic,
+            })),
+        };
     }
 
     async findByUsername(username: string): Promise<UserDto | null> {

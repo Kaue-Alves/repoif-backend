@@ -14,14 +14,18 @@ export class SubjectController {
         return await this.subjectService.create(subjectDto, teacherId);
     }
 
+    @UseGuards(AuthGuard)
     @Get()
-    async findAll() {
-        return await this.subjectService.findAll();
+    async findAll(@Req() request: any) {
+        const teacherId = request.user.sub;
+        return await this.subjectService.findAll(teacherId);
     }
 
+    @UseGuards(AuthGuard)
     @Get(':id')
-    async findOne(@Param('id') id: string) {
-        return await this.subjectService.findOne(id);
+    async findOne(@Param('id') id: string, @Req() request: any) {
+        const teacherId = request.user.sub;
+        return await this.subjectService.findOne(id, teacherId);
     }
 
     @UseGuards(AuthGuard)
@@ -33,8 +37,9 @@ export class SubjectController {
 
     @UseGuards(AuthGuard)
     @Delete(':id')
-    async remove(@Param('id') id: string) {
-        return await this.subjectService.remove(id);
+    async remove(@Param('id') id: string, @Req() request: any) {
+        const teacherId = request.user.sub;
+        return await this.subjectService.remove(id, teacherId);
     }
 }
 
