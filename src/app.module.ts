@@ -11,7 +11,7 @@ import { SubjectModule } from './subject/subject.module';
 import { FilesModule } from './files/files.module';
 
 @Module({
-  imports: [UsersModule, AuthModule, ConfigModule.forRoot({isGlobal: true, ignoreEnvFile: true}), DbModule, MailModule, R2Module, SubjectModule, FilesModule],
+  imports: [UsersModule, AuthModule, ConfigModule.forRoot({isGlobal: true}), DbModule, MailModule, R2Module, SubjectModule, FilesModule],
   controllers: [AppController],
   providers: [AppService],
 })
