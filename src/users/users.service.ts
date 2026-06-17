@@ -79,6 +79,18 @@ export class UsersService {
         return await this.usersRepository.find()
     }
 
+    async searchTeachers(query: string): Promise<{ id: string; username: string; role: string }[]> {
+        const users = await this.usersRepository
+            .createQueryBuilder('user')
+            .where('user.role = :role', { role: 'TEACHER' })
+            .andWhere('user.emailVerified = true')
+            .andWhere('user.username ILIKE :query', { query: `%${query.trim()}%` })
+            .select(['user.id', 'user.username', 'user.role'])
+            .getMany();
+
+        return users.map(u => ({ id: u.id, username: u.username, role: u.role }));
+    }
+
     async getProfile(username: string, requestingUserId?: string) {
         const user = await this.usersRepository.findOne({ where: { username } });
 

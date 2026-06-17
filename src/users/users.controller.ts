@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { UserDto } from './users.dto';
 import { UsersService } from './users.service';
 import { AuthGuard } from 'src/auth/auth.guard';
@@ -23,6 +23,14 @@ export class UsersController {
     @Get()
     async findAllUsers(): Promise<UserDto[] | null> {
         return await this.userService.findAllUsers();
+    }
+
+    @Get('search')
+    async searchTeachers(@Query('q') query: string) {
+        if (!query || query.trim().length < 2) {
+            return [];
+        }
+        return await this.userService.searchTeachers(query);
     }
 
     @Get(':username')
