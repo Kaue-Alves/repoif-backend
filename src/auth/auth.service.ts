@@ -38,9 +38,15 @@ export class AuthService {
         await this.usersService.resetPassword(token, newPassword);
     }
     
-    async signIn(username: string, email: string,password: string): Promise<AuthResponseDto> {
+    async signIn(username: string, email: string, password: string): Promise<AuthResponseDto> {
 
-        const foundUser = await this.usersService.findByUsername(username.trim())
+        if (!username && !email) {
+            throw new UnauthorizedException();
+        }
+
+        const foundUser = username
+            ? await this.usersService.findByUsername(username.trim())
+            : await this.usersService.findByEmail(email.trim());
 
         if (!foundUser || !compareSync(password.trim(), foundUser.password)) {
             throw new UnauthorizedException();

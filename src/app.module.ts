@@ -9,9 +9,10 @@ import { MailModule } from './mail/mail.module';
 import { TesteGuardaModule } from './teste-guarda/teste-guarda.module';
 import { R2Module } from './r2/r2.module';
 import { SubjectModule } from './subject/subject.module';
+import { FilesModule } from './files/files.module';
 
 @Module({
-  imports: [UsersModule, AuthModule, ConfigModule.forRoot({isGlobal: true, ignoreEnvFile: true}), DbModule, MailModule, TesteGuardaModule, R2Module, SubjectModule],
+  imports: [UsersModule, AuthModule, ConfigModule.forRoot({isGlobal: true, ignoreEnvFile: true}), DbModule, MailModule, TesteGuardaModule, R2Module, SubjectModule, FilesModule],
   controllers: [AppController],
   providers: [AppService],
 })

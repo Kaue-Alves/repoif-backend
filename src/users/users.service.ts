@@ -27,29 +27,50 @@ export class UsersService {
     
     async create(newUser: UserDto) {
 
-        const userAlreadyRegistered = await this.findByUsername(newUser.username)
+        const existingUser = await this.usersRepository.findOne({ where: { username: newUser.username.trim() } })
 
-        if (userAlreadyRegistered) {
-            throw new ConflictException(`User ${newUser.username} already registered`)
+        if (existingUser) {
+            if (existingUser.emailVerified) {
+                throw new ConflictException(`O username "${newUser.username}" já está em uso`)
+            }
+
+            // Conta existe mas não foi verificada: corrige o email e reenvia o token
+            existingUser.email = newUser.email.trim()
+            existingUser.password = hashSync(newUser.password.trim(), 10)
+            await this.usersRepository.save(existingUser)
+
+            await this.tokenRepository.delete({ userId: existingUser.id, type: TokenTypeEnum.EMAIL_VERIFICATION })
+
+            const tokenEntity = new TokenEntity()
+            tokenEntity.userId = existingUser.id
+            tokenEntity.token = randomUUID()
+            tokenEntity.type = TokenTypeEnum.EMAIL_VERIFICATION
+            tokenEntity.expiresAt = new Date(Date.now() + 1000 * 60 * 10)
+
+            await this.tokenRepository.save(tokenEntity)
+
+            this.mailService.sendVerificationEmail(existingUser.email, existingUser.username, tokenEntity.token).catch(() => {})
+
+            return { id: existingUser.id, username: existingUser.username }
         }
-        
+
         const dbUser = new UserEntity()
         dbUser.username = newUser.username.trim()
         dbUser.email = newUser.email.trim()
         dbUser.password = hashSync(newUser.password.trim(), 10)
         dbUser.role = newUser.role
-        
+
         const {id, username, email} = await this.usersRepository.save(dbUser)
-        
+
         const tokenEntity = new TokenEntity()
         tokenEntity.userId = id
         tokenEntity.token = randomUUID()
         tokenEntity.type = TokenTypeEnum.EMAIL_VERIFICATION
-        tokenEntity.expiresAt = new Date(Date.now() + 1000 * 60 * 10) // token expires in 10 minutes
-        
+        tokenEntity.expiresAt = new Date(Date.now() + 1000 * 60 * 10)
+
         await this.tokenRepository.save(tokenEntity)
-        
-        await this.mailService.sendVerificationEmail(email, username, tokenEntity.token)
+
+        this.mailService.sendVerificationEmail(email, username, tokenEntity.token).catch(() => {});
 
         return {id, username}
     }
@@ -81,13 +102,8 @@ export class UsersService {
     }
 
     async findByUsername(username: string): Promise<UserDto | null> {
-        
-        const userFound = await this.usersRepository.findOne({where: {username}})
-        
-        if (!userFound) {
-            return null
-        }
-
+        const userFound = await this.usersRepository.findOne({ where: { username } })
+        if (!userFound) return null
         return {
             id: userFound.id,
             username: userFound.username,
@@ -96,8 +112,19 @@ export class UsersService {
             role: userFound.role,
             emailVerified: userFound.emailVerified
         }
+    }
 
-        
+    async findByEmail(email: string): Promise<UserDto | null> {
+        const userFound = await this.usersRepository.findOne({ where: { email } })
+        if (!userFound) return null
+        return {
+            id: userFound.id,
+            username: userFound.username,
+            email: userFound.email,
+            password: userFound.password,
+            role: userFound.role,
+            emailVerified: userFound.emailVerified
+        }
     }
 
     async verifyEmail(token: string): Promise<void> {
@@ -166,7 +193,7 @@ export class UsersService {
         tokenEntity.expiresAt = new Date(Date.now() + 1000 * 60 * 10); // 10 minutos
 
         await this.tokenRepository.save(tokenEntity);
-        await this.mailService.sendPasswordResetEmail(user.email, user.username, tokenEntity.token);
+        this.mailService.sendPasswordResetEmail(user.email, user.username, tokenEntity.token).catch(() => {});
     }
 
     async resetPassword(token: string, newPassword: string): Promise<void> {
