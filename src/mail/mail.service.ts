@@ -8,10 +8,13 @@ export class MailService {
   private readonly transporter: nodemailer.Transporter;
 
   constructor(private readonly configService: ConfigService) {
+    const secure = this.configService.get<string>('MAIL_SECURE') === 'true';
+    const port = parseInt(this.configService.get<string>('MAIL_PORT') ?? '587', 10);
+
     this.transporter = nodemailer.createTransport({
       host: this.configService.get<string>('MAIL_HOST'),
-      port: this.configService.get<number>('MAIL_PORT'),
-      secure: this.configService.get<boolean>('MAIL_SECURE') ?? false,
+      port,
+      secure,
       auth: {
         user: this.configService.get<string>('MAIL_USER'),
         pass: this.configService.get<string>('MAIL_PASS'),
