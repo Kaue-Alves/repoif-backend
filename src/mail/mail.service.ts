@@ -36,7 +36,7 @@ export class MailService {
     const verificationLink = `${frontendUrl}/verify-email?token=${token}`;
 
     try {
-      await this.transporter.sendMail({
+      const info = await this.transporter.sendMail({
         from: mailFrom,
         to,
         subject: 'Bem-vindo ao RepoIf - Verifique sua conta',
@@ -48,6 +48,7 @@ export class MailService {
           <p>Atenciosamente,<br/>Equipe RepoIf</p>
         `,
       });
+      console.log('[MailService] verificação enviada:', info.messageId, info.response);
     } catch (error){
       console.error('Erro ao enviar e-mail de verificação:', error);
       throw new BadRequestException('Falha ao enviar e-mail de verificação.');
@@ -64,7 +65,7 @@ export class MailService {
     const resetLink = `${frontendUrl}/reset-password?token=${token}`;
 
     try {
-      await this.transporter.sendMail({
+      const info = await this.transporter.sendMail({
         from: mailFrom,
         to,
         subject: 'RepoIf - Redefinição de senha',
@@ -77,6 +78,7 @@ export class MailService {
           <p>Atenciosamente,<br/>Equipe RepoIf</p>
         `,
       });
+      console.log('[MailService] redefinição enviada:', info.messageId, info.response);
     } catch (error) {
       console.error('Erro ao enviar e-mail de redefinição de senha:', error);
       throw new BadRequestException('Falha ao enviar e-mail de redefinição de senha.');
