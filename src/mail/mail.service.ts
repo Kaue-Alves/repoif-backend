@@ -44,7 +44,8 @@ export class MailService {
           <p>Atenciosamente,<br/>Equipe RepoIf</p>
         `,
       });
-    } catch {
+    } catch (error){
+      console.error('Erro ao enviar e-mail de verificação:', error);
       throw new BadRequestException('Falha ao enviar e-mail de verificação.');
     }
   }
@@ -72,7 +73,8 @@ export class MailService {
           <p>Atenciosamente,<br/>Equipe RepoIf</p>
         `,
       });
-    } catch {
+    } catch (error) {
+      console.error('Erro ao enviar e-mail de redefinição de senha:', error);
       throw new BadRequestException('Falha ao enviar e-mail de redefinição de senha.');
     }
   }
