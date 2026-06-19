@@ -19,6 +19,10 @@ export class MailService {
     const verificationLink = `${frontendUrl}/verify-email?token=${token}`;
 
     try {
+
+      console.log(frontendUrl);
+      
+      
       const response = await this.client.transactionalEmails.sendTransacEmail({
         sender: { email: mailFrom, name: 'RepoIf' },
         to: [{ email: to, name }],
