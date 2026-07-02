@@ -9,9 +9,11 @@ import { MailModule } from './mail/mail.module';
 import { R2Module } from './r2/r2.module';
 import { SubjectModule } from './subject/subject.module';
 import { FilesModule } from './files/files.module';
+import { ReportsModule } from './reports/reports.module';
+import { AdminModule } from './admin/admin.module';
 
 @Module({
-  imports: [UsersModule, AuthModule, ConfigModule.forRoot({isGlobal: true}), DbModule, MailModule, R2Module, SubjectModule, FilesModule],
+  imports: [UsersModule, AuthModule, ConfigModule.forRoot({isGlobal: true}), DbModule, MailModule, R2Module, SubjectModule, FilesModule, ReportsModule, AdminModule],
   controllers: [AppController],
   providers: [AppService],
 })

@@ -6,9 +6,12 @@ import { UserEntity } from 'src/db/entities/user.entity';
 import { Repository } from 'typeorm';
 import { randomUUID } from 'crypto';
 import { TokenEntity } from 'src/db/entities/token.entity';
+import { SubjectEntity } from 'src/db/entities/subject.entity';
 import { TokenTypeEnum } from 'src/common/enums/token-type.enum';
+import { UserRoleEnum } from 'src/common/enums/user-role.enum';
 import { MailService } from 'src/mail/mail.service';
 import { SubjectService } from 'src/subject/subject.service';
+import { ListTeachersDto, PaginatedTeachers } from './list-teachers.dto';
 
 @Injectable()
 export class UsersService {
@@ -19,6 +22,9 @@ export class UsersService {
 
         @InjectRepository(TokenEntity)
         private readonly tokenRepository: Repository<TokenEntity>,
+
+        @InjectRepository(SubjectEntity)
+        private readonly subjectRepository: Repository<SubjectEntity>,
 
         private readonly mailService: MailService,
 
@@ -91,6 +97,63 @@ export class UsersService {
         return users.map(u => ({ id: u.id, username: u.username, role: u.role }));
     }
 
+    async findTeachers(params: ListTeachersDto): Promise<PaginatedTeachers> {
+        const page = params.page ?? 1;
+        const limit = params.limit ?? 12;
+        const search = params.search?.trim();
+
+        const queryBuilder = this.usersRepository
+            .createQueryBuilder('user')
+            .where('user.role = :role', { role: UserRoleEnum.TEACHER })
+            .andWhere('user.emailVerified = true')
+            .select(['user.id', 'user.username', 'user.role'])
+            .orderBy('user.username', 'ASC')
+            .skip((page - 1) * limit)
+            .take(limit);
+
+        if (search && search.length >= 2) {
+            queryBuilder.andWhere('user.username ILIKE :search', { search: `%${search}%` });
+        }
+
+        const [users, total] = await queryBuilder.getManyAndCount();
+
+        // Conta as disciplinas públicas de cada professor em uma única query.
+        const publicSubjectsByTeacher = new Map<string, number>();
+        if (users.length > 0) {
+            const counts = await this.subjectRepository
+                .createQueryBuilder('subject')
+                .select('subject.teacherId', 'teacherId')
+                .addSelect('COUNT(subject.id)', 'count')
+                .where('subject.teacherId IN (:...ids)', { ids: users.map(u => u.id) })
+                .andWhere('subject.isPublic = true')
+                .groupBy('subject.teacherId')
+                .getRawMany<{ teacherId: string; count: string }>();
+
+            for (const row of counts) {
+                publicSubjectsByTeacher.set(row.teacherId, Number(row.count));
+            }
+        }
+
+        const totalPages = Math.ceil(total / limit);
+
+        return {
+            data: users.map(u => ({
+                id: u.id,
+                username: u.username,
+                role: u.role,
+                publicSubjectsCount: publicSubjectsByTeacher.get(u.id) ?? 0,
+            })),
+            meta: {
+                page,
+                limit,
+                total,
+                totalPages,
+                hasNextPage: page < totalPages,
+                hasPrevPage: page > 1,
+            },
+        };
+    }
+
     async getProfile(username: string, requestingUserId?: string) {
         const user = await this.usersRepository.findOne({ where: { username } });
 
@@ -102,6 +165,7 @@ export class UsersService {
         const subjects = await this.subjectService.findByTeacherId(user.id, isOwner);
 
         return {
+            id: user.id,
             username: user.username,
             role: user.role,
             subjects: subjects.map(s => ({

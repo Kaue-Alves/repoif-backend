@@ -4,12 +4,13 @@ import { UsersService } from './users.service';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { UserEntity } from 'src/db/entities/user.entity';
 import { TokenEntity } from 'src/db/entities/token.entity';
+import { SubjectEntity } from 'src/db/entities/subject.entity';
 import { MailModule } from 'src/mail/mail.module';
 import { SubjectModule } from 'src/subject/subject.module';
 
 @Module({
   controllers: [UsersController],
-  imports: [TypeOrmModule.forFeature([UserEntity, TokenEntity]), MailModule, SubjectModule],
+  imports: [TypeOrmModule.forFeature([UserEntity, TokenEntity, SubjectEntity]), MailModule, SubjectModule],
   exports: [UsersService],
   providers: [UsersService]
 })

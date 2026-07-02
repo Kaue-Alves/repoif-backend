@@ -1,4 +1,4 @@
-import { Column, Entity, PrimaryGeneratedColumn } from "typeorm";
+import { Column, DeleteDateColumn, Entity, PrimaryGeneratedColumn } from "typeorm";
 
 import { UserRoleEnum } from "src/common/enums/user-role.enum";
 
@@ -13,7 +13,7 @@ export class UserEntity {
 
     @Column({type: 'varchar'})
     email!: string;
-    
+
     @Column({type: 'varchar'})
     password!: string;
 
@@ -22,4 +22,7 @@ export class UserEntity {
 
     @Column({type: 'boolean', default: false})
     emailVerified!: boolean;
+
+    @DeleteDateColumn({ name: 'deleted_at', type: 'timestamp', nullable: true })
+    deletedAt?: Date | null;
 }

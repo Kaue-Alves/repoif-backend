@@ -1,4 +1,4 @@
-import { Column, CreateDateColumn, Entity, PrimaryGeneratedColumn, UpdateDateColumn } from 'typeorm';
+import { Column, CreateDateColumn, DeleteDateColumn, Entity, PrimaryGeneratedColumn, UpdateDateColumn } from 'typeorm';
 
 @Entity({ name: 'files' })
 export class FileEntity {
@@ -32,4 +32,7 @@ export class FileEntity {
 
     @UpdateDateColumn({ name: 'updated_at', type: 'timestamp' })
     updatedAt!: Date;
+
+    @DeleteDateColumn({ name: 'deleted_at', type: 'timestamp', nullable: true })
+    deletedAt?: Date | null;
 }
