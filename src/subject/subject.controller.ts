@@ -1,7 +1,8 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { SubjectService } from './subject.service';
 import { SubjectDto } from './subject.dto';
 import { AuthGuard } from 'src/auth/auth.guard';
+import { PaginationQueryDto } from 'src/common/dto/pagination-query.dto';
 
 @Controller('subjects')
 export class SubjectController {
@@ -16,16 +17,16 @@ export class SubjectController {
 
     @UseGuards(AuthGuard)
     @Get()
-    async findAll(@Req() request: any) {
+    async findAll(@Query() query: PaginationQueryDto, @Req() request: any) {
         const teacherId = request.user.sub;
-        return await this.subjectService.findAll(teacherId);
+        return await this.subjectService.findAll(teacherId, query);
     }
 
     @UseGuards(AuthGuard)
     @Get(':id')
     async findOne(@Param('id') id: string, @Req() request: any) {
-        const teacherId = request.user.sub;
-        return await this.subjectService.findOne(id, teacherId);
+        const userId = request.user.sub;
+        return await this.subjectService.findOneForViewer(id, userId);
     }
 
     @UseGuards(AuthGuard)

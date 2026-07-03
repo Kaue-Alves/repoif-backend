@@ -6,6 +6,7 @@ import { SubjectEntity } from 'src/db/entities/subject.entity';
 import { UserEntity } from 'src/db/entities/user.entity';
 import { UserRoleEnum } from 'src/common/enums/user-role.enum';
 import { R2Service } from 'src/r2/r2.service';
+import { ClassroomService } from 'src/classroom/classroom.service';
 import { ConfirmUploadDto, RequestUploadUrlDto, UpdateFileDto } from './file.dto';
 
 @Injectable()
@@ -22,6 +23,8 @@ export class FilesService {
         private readonly userRepository: Repository<UserEntity>,
 
         private readonly r2Service: R2Service,
+
+        private readonly classroomService: ClassroomService,
     ) {}
 
     private async assertTeacher(userId: string): Promise<UserEntity> {
@@ -72,7 +75,8 @@ export class FilesService {
 
         const isOwner = requestingUserId === subject.teacherId;
 
-        if (isOwner) {
+        // Dono ou aluno ativo de uma turma que contém a disciplina veem todos os arquivos.
+        if (isOwner || (await this.classroomService.isSubjectAccessibleToMember(subjectId, requestingUserId))) {
             return this.fileRepository.find({ where: { subjectId } });
         }
 
@@ -86,7 +90,14 @@ export class FilesService {
         const isOwner = requestingUserId === file.uploadedBy;
 
         if (!file.isPublic && !isOwner) {
-            throw new ForbiddenException('Este arquivo é privado');
+            // Alunos ativos de uma turma que contém a disciplina podem baixar arquivos privados dela.
+            const hasClassAccess = await this.classroomService.isSubjectAccessibleToMember(
+                file.subjectId,
+                requestingUserId,
+            );
+            if (!hasClassAccess) {
+                throw new ForbiddenException('Este arquivo é privado');
+            }
         }
 
         return this.r2Service.getPresignedDownloadUrl(file.key);

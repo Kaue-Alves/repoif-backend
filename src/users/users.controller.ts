@@ -3,18 +3,14 @@ import { UserDto } from './users.dto';
 import { ListTeachersDto } from './list-teachers.dto';
 import { UsersService } from './users.service';
 import { AuthGuard } from 'src/auth/auth.guard';
-import { JwtService } from '@nestjs/jwt';
-import { ConfigService } from '@nestjs/config';
 
 @Controller('users')
 export class UsersController {
 
     constructor(
         private readonly userService: UsersService,
-        private readonly jwtService: JwtService,
-        private readonly configService: ConfigService
     ){}
-    
+
     @Post()
     async create(@Body() user: UserDto) {
         return await this.userService.create(user);
@@ -26,37 +22,25 @@ export class UsersController {
         return await this.userService.findAllUsers();
     }
 
+    @UseGuards(AuthGuard)
     @Get('teachers')
-    async listTeachers(@Query() query: ListTeachersDto) {
-        return await this.userService.findTeachers(query);
+    async listTeachers(@Query() query: ListTeachersDto, @Req() request: any) {
+        return await this.userService.findTeachers(query, { userId: request.user.sub, role: request.user.role });
     }
 
+    @UseGuards(AuthGuard)
     @Get('search')
-    async searchTeachers(@Query('q') query: string) {
+    async searchTeachers(@Query('q') query: string, @Req() request: any) {
         if (!query || query.trim().length < 2) {
             return [];
         }
-        return await this.userService.searchTeachers(query);
+        return await this.userService.searchTeachers(query, { userId: request.user.sub, role: request.user.role });
     }
 
+    @UseGuards(AuthGuard)
     @Get(':username')
     async getProfile(@Param('username') username: string, @Req() request: any) {
-        let requestingUserId: string | undefined;
-
-        const authHeader = request.headers.authorization;
-        if (authHeader && authHeader.startsWith('Bearer ')) {
-            const token = authHeader.split(' ')[1];
-            try {
-                const payload = await this.jwtService.verifyAsync(token, {
-                    secret: this.configService.get<string>('JWT_SECRET'),
-                });
-                requestingUserId = payload.sub;
-            } catch (e) {
-                // Ignore invalid token, treat as guest
-            }
-        }
-
-        return await this.userService.getProfile(username, requestingUserId);
+        return await this.userService.getProfile(username, { userId: request.user.sub, role: request.user.role });
     }
 
     // Rota futura: /users/:username/:subjectName

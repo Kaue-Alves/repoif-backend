@@ -11,9 +11,11 @@ import { SubjectModule } from './subject/subject.module';
 import { FilesModule } from './files/files.module';
 import { ReportsModule } from './reports/reports.module';
 import { AdminModule } from './admin/admin.module';
+import { ClassroomModule } from './classroom/classroom.module';
+import { AssignmentsModule } from './assignments/assignments.module';
 
 @Module({
-  imports: [UsersModule, AuthModule, ConfigModule.forRoot({isGlobal: true}), DbModule, MailModule, R2Module, SubjectModule, FilesModule, ReportsModule, AdminModule],
+  imports: [UsersModule, AuthModule, ConfigModule.forRoot({isGlobal: true}), DbModule, MailModule, R2Module, SubjectModule, FilesModule, ReportsModule, AdminModule, ClassroomModule, AssignmentsModule],
   controllers: [AppController],
   providers: [AppService],
 })

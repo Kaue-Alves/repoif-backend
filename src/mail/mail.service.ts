@@ -67,6 +67,67 @@ export class MailService {
     }
   }
 
+  /** Notifica os alunos de que um novo trabalho foi criado. */
+  async sendNewAssignmentEmail(
+    to: string,
+    studentName: string,
+    subjectName: string,
+    assignmentTitle: string,
+    dueDate: Date,
+    assignmentId: string,
+  ) {
+    const frontendUrl = this.configService.getOrThrow<string>('FRONTEND_URL');
+    const mailFrom = this.configService.getOrThrow<string>('MAIL_FROM');
+    const link = `${frontendUrl}/assignments/${assignmentId}`;
+    const due = dueDate.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+
+    await this.client.transactionalEmails.sendTransacEmail({
+      sender: { email: mailFrom, name: 'RepoIF' },
+      to: [{ email: to, name: studentName }],
+      subject: `Novo trabalho: ${assignmentTitle}`,
+      htmlContent: this.buildEmailTemplate({
+        heading: 'Novo trabalho disponível 📋',
+        bodyHtml: `
+          <p style="margin:0 0 16px;">Olá <strong>${studentName}</strong>,</p>
+          <p style="margin:0 0 16px;">Um novo trabalho foi criado na disciplina <strong>${subjectName}</strong>:</p>
+          <p style="margin:0 0 8px;"><strong>${assignmentTitle}</strong></p>
+          <p style="margin:0 0 16px;">Data limite de entrega: <strong>${due}</strong>.</p>
+        `,
+        button: { label: 'Ver trabalho', url: link },
+        footnote: 'Acesse o RepoIF para enviar sua entrega antes do prazo.',
+      }),
+    });
+  }
+
+  /** Notifica o professor de que um aluno entregou um trabalho. */
+  async sendSubmissionEmail(
+    to: string,
+    teacherName: string,
+    studentName: string,
+    subjectName: string,
+    assignmentTitle: string,
+    assignmentId: string,
+  ) {
+    const frontendUrl = this.configService.getOrThrow<string>('FRONTEND_URL');
+    const mailFrom = this.configService.getOrThrow<string>('MAIL_FROM');
+    const link = `${frontendUrl}/assignments/${assignmentId}`;
+
+    await this.client.transactionalEmails.sendTransacEmail({
+      sender: { email: mailFrom, name: 'RepoIF' },
+      to: [{ email: to, name: teacherName }],
+      subject: `Nova entrega: ${assignmentTitle}`,
+      htmlContent: this.buildEmailTemplate({
+        heading: 'Nova entrega recebida 📥',
+        bodyHtml: `
+          <p style="margin:0 0 16px;">Olá <strong>${teacherName}</strong>,</p>
+          <p style="margin:0 0 16px;">O aluno <strong>${studentName}</strong> entregou o trabalho <strong>${assignmentTitle}</strong> da disciplina <strong>${subjectName}</strong>.</p>
+        `,
+        button: { label: 'Ver entregas', url: link },
+        footnote: 'Acesse o RepoIF para conferir as entregas dos alunos.',
+      }),
+    });
+  }
+
   /**
    * Monta o HTML de um e-mail transacional com a identidade visual do RepoIF.
    * Usa estilos inline e layout em tabela para máxima compatibilidade entre

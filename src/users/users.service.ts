@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { UserDto } from './users.dto';
 import { hashSync } from 'bcrypt';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -7,11 +7,19 @@ import { Repository } from 'typeorm';
 import { randomUUID } from 'crypto';
 import { TokenEntity } from 'src/db/entities/token.entity';
 import { SubjectEntity } from 'src/db/entities/subject.entity';
+import { ClassroomMemberEntity } from 'src/db/entities/classroom-member.entity';
 import { TokenTypeEnum } from 'src/common/enums/token-type.enum';
 import { UserRoleEnum } from 'src/common/enums/user-role.enum';
+import { ClassroomMemberStatusEnum } from 'src/common/enums/classroom-member-status.enum';
 import { MailService } from 'src/mail/mail.service';
 import { SubjectService } from 'src/subject/subject.service';
 import { ListTeachersDto, PaginatedTeachers } from './list-teachers.dto';
+
+/** Usuário autenticado que faz a requisição. */
+export interface RequestingUser {
+    userId: string;
+    role: UserRoleEnum;
+}
 
 @Injectable()
 export class UsersService {
@@ -26,10 +34,29 @@ export class UsersService {
         @InjectRepository(SubjectEntity)
         private readonly subjectRepository: Repository<SubjectEntity>,
 
+        @InjectRepository(ClassroomMemberEntity)
+        private readonly classroomMemberRepository: Repository<ClassroomMemberEntity>,
+
         private readonly mailService: MailService,
 
         private readonly subjectService: SubjectService
     ) {}
+
+    /**
+     * Retorna os IDs dos professores com quem o aluno possui algum vínculo,
+     * ou seja, professores donos de turmas em que o aluno é membro ativo.
+     */
+    private async getLinkedTeacherIds(studentId: string): Promise<string[]> {
+        const rows = await this.classroomMemberRepository
+            .createQueryBuilder('member')
+            .innerJoin('classrooms', 'classroom', 'classroom.id = member.classroomId')
+            .where('member.studentId = :studentId', { studentId })
+            .andWhere('member.status = :status', { status: ClassroomMemberStatusEnum.ACTIVE })
+            .select('DISTINCT classroom.teacherId', 'teacherId')
+            .getRawMany<{ teacherId: string }>();
+
+        return rows.map(r => r.teacherId);
+    }
     
     async create(newUser: UserDto) {
 
@@ -85,22 +112,55 @@ export class UsersService {
         return await this.usersRepository.find()
     }
 
-    async searchTeachers(query: string): Promise<{ id: string; username: string; role: string }[]> {
-        const users = await this.usersRepository
+    async searchTeachers(query: string, requester: RequestingUser): Promise<{ id: string; username: string; role: string }[]> {
+        // Alunos só podem buscar professores com quem possuem vínculo.
+        let linkedTeacherIds: string[] | null = null;
+        if (requester.role === UserRoleEnum.STUDENT) {
+            linkedTeacherIds = await this.getLinkedTeacherIds(requester.userId);
+            if (linkedTeacherIds.length === 0) {
+                return [];
+            }
+        }
+
+        const qb = this.usersRepository
             .createQueryBuilder('user')
             .where('user.role = :role', { role: 'TEACHER' })
             .andWhere('user.emailVerified = true')
             .andWhere('user.username ILIKE :query', { query: `%${query.trim()}%` })
-            .select(['user.id', 'user.username', 'user.role'])
-            .getMany();
+            .select(['user.id', 'user.username', 'user.role']);
+
+        if (linkedTeacherIds) {
+            qb.andWhere('user.id IN (:...linkedTeacherIds)', { linkedTeacherIds });
+        }
+
+        const users = await qb.getMany();
 
         return users.map(u => ({ id: u.id, username: u.username, role: u.role }));
     }
 
-    async findTeachers(params: ListTeachersDto): Promise<PaginatedTeachers> {
+    async findTeachers(params: ListTeachersDto, requester: RequestingUser): Promise<PaginatedTeachers> {
         const page = params.page ?? 1;
         const limit = params.limit ?? 12;
         const search = params.search?.trim();
+
+        // Alunos só enxergam professores com quem possuem vínculo.
+        let linkedTeacherIds: string[] | null = null;
+        if (requester.role === UserRoleEnum.STUDENT) {
+            linkedTeacherIds = await this.getLinkedTeacherIds(requester.userId);
+            if (linkedTeacherIds.length === 0) {
+                return {
+                    data: [],
+                    meta: {
+                        page,
+                        limit,
+                        total: 0,
+                        totalPages: 0,
+                        hasNextPage: false,
+                        hasPrevPage: false,
+                    },
+                };
+            }
+        }
 
         const queryBuilder = this.usersRepository
             .createQueryBuilder('user')
@@ -110,6 +170,10 @@ export class UsersService {
             .orderBy('user.username', 'ASC')
             .skip((page - 1) * limit)
             .take(limit);
+
+        if (linkedTeacherIds) {
+            queryBuilder.andWhere('user.id IN (:...linkedTeacherIds)', { linkedTeacherIds });
+        }
 
         if (search && search.length >= 2) {
             queryBuilder.andWhere('user.username ILIKE :search', { search: `%${search}%` });
@@ -154,14 +218,23 @@ export class UsersService {
         };
     }
 
-    async getProfile(username: string, requestingUserId?: string) {
+    async getProfile(username: string, requester: RequestingUser) {
         const user = await this.usersRepository.findOne({ where: { username } });
 
         if (!user) {
             throw new NotFoundException(`User ${username} not found`);
         }
 
-        const isOwner = requestingUserId === user.id;
+        const isOwner = requester.userId === user.id;
+
+        // Alunos só podem acessar o perfil de professores com quem têm vínculo.
+        if (!isOwner && requester.role === UserRoleEnum.STUDENT && user.role === UserRoleEnum.TEACHER) {
+            const linkedTeacherIds = await this.getLinkedTeacherIds(requester.userId);
+            if (!linkedTeacherIds.includes(user.id)) {
+                throw new ForbiddenException('Você não possui vínculo com este professor');
+            }
+        }
+
         const subjects = await this.subjectService.findByTeacherId(user.id, isOwner);
 
         return {

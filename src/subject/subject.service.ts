@@ -1,10 +1,12 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { SubjectEntity } from 'src/db/entities/subject.entity';
 import { Repository } from 'typeorm';
 import { SubjectDto } from './subject.dto';
 import { UserEntity } from 'src/db/entities/user.entity';
 import { UserRoleEnum } from 'src/common/enums/user-role.enum';
+import { ClassroomService } from 'src/classroom/classroom.service';
+import { buildPaginationMeta, Paginated, PaginationQueryDto } from 'src/common/dto/pagination-query.dto';
 
 @Injectable()
 export class SubjectService {
@@ -13,7 +15,9 @@ export class SubjectService {
         private readonly subjectRepository: Repository<SubjectEntity>,
 
         @InjectRepository(UserEntity)
-        private readonly userRepository: Repository<UserEntity>
+        private readonly userRepository: Repository<UserEntity>,
+
+        private readonly classroomService: ClassroomService
     ) {}
 async create(subjectDto: SubjectDto, teacherId: string): Promise<SubjectEntity> {
 
@@ -32,8 +36,24 @@ async create(subjectDto: SubjectDto, teacherId: string): Promise<SubjectEntity> 
 }
 
 
-    async findAll(teacherId: string): Promise<SubjectEntity[]> {
-        return await this.subjectRepository.find({ where: { teacherId } });
+    async findAll(teacherId: string, query: PaginationQueryDto): Promise<Paginated<SubjectEntity>> {
+        const page = query.page ?? 1;
+        const limit = query.limit ?? 12;
+        const search = query.search?.trim();
+
+        const qb = this.subjectRepository
+            .createQueryBuilder('subject')
+            .where('subject.teacherId = :teacherId', { teacherId })
+            .orderBy('subject.name', 'ASC')
+            .skip((page - 1) * limit)
+            .take(limit);
+
+        if (search) {
+            qb.andWhere('subject.name ILIKE :search', { search: `%${search}%` });
+        }
+
+        const [data, total] = await qb.getManyAndCount();
+        return { data, meta: buildPaginationMeta(page, limit, total) };
     }
 
     async findByTeacherId(teacherId: string, isOwner: boolean): Promise<SubjectEntity[]> {
@@ -50,6 +70,41 @@ async create(subjectDto: SubjectDto, teacherId: string): Promise<SubjectEntity> 
             throw new NotFoundException(`Subject with ID ${id} not found`);
         }
         return subject;
+    }
+
+    /**
+     * Leitura da disciplina para um visualizador. Pode acessar:
+     * - o professor dono;
+     * - qualquer usuário logado se a disciplina for pública;
+     * - alunos ativos de uma turma que contenha esta disciplina.
+     * Inclui o username do docente para exibição.
+     */
+    async findOneForViewer(id: string, userId?: string) {
+        const subject = await this.subjectRepository.findOne({ where: { id } });
+        if (!subject) {
+            throw new NotFoundException(`Subject with ID ${id} not found`);
+        }
+
+        const isOwner = !!userId && subject.teacherId === userId;
+        if (!isOwner && !subject.isPublic) {
+            const hasAccess = await this.classroomService.isSubjectAccessibleToMember(id, userId);
+            if (!hasAccess) {
+                throw new ForbiddenException('Você não tem acesso a esta disciplina');
+            }
+        }
+
+        const teacher = await this.userRepository.findOne({ where: { id: subject.teacherId } });
+
+        return {
+            id: subject.id,
+            name: subject.name,
+            description: subject.description,
+            isPublic: subject.isPublic,
+            teacherId: subject.teacherId,
+            teacherUsername: teacher?.username ?? null,
+            createdAt: subject.createdAt,
+            updatedAt: subject.updatedAt,
+        };
     }
 
     async update(id: string, subjectDto: Partial<SubjectDto>, teacherId: string): Promise<SubjectEntity> {
