@@ -128,6 +128,78 @@ export class MailService {
     });
   }
 
+  /** Notifica o professor de que um aluno pediu para entrar na turma. */
+  async sendJoinRequestEmail(
+    to: string,
+    teacherName: string,
+    studentName: string,
+    classroomName: string,
+    classroomId: string,
+  ) {
+    const frontendUrl = this.configService.getOrThrow<string>('FRONTEND_URL');
+    const mailFrom = this.configService.getOrThrow<string>('MAIL_FROM');
+    const link = `${frontendUrl}/classrooms/${classroomId}?tab=requests`;
+
+    await this.client.transactionalEmails.sendTransacEmail({
+      sender: { email: mailFrom, name: 'RepoIF' },
+      to: [{ email: to, name: teacherName }],
+      subject: `Novo pedido de entrada: ${classroomName}`,
+      htmlContent: this.buildEmailTemplate({
+        heading: 'Novo pedido de entrada 🙋',
+        bodyHtml: `
+          <p style="margin:0 0 16px;">Olá <strong>${teacherName}</strong>,</p>
+          <p style="margin:0 0 16px;">O aluno <strong>${studentName}</strong> pediu para entrar na turma <strong>${classroomName}</strong>.</p>
+          <p style="margin:0 0 16px;">O pedido fica pendente até que você aceite ou recuse.</p>
+        `,
+        button: { label: 'Ver pedidos', url: link },
+        footnote: 'Acesse o RepoIF para aceitar ou recusar os pedidos de entrada.',
+      }),
+    });
+  }
+
+  /**
+   * Notifica o aluno de que agora é membro ativo da turma.
+   *
+   * A `origem` muda o texto e o assunto: quem pediu para entrar teve o pedido
+   * *aceito*; quem foi *adicionado* pelo professor nunca pediu nada, e dizer a
+   * ele que "seu pedido foi aceito" seria mentira.
+   */
+  async sendJoinAcceptedEmail(
+    to: string,
+    studentName: string,
+    classroomName: string,
+    classroomId: string,
+    origem: 'pedido-aceito' | 'adicionado-pelo-professor',
+  ) {
+    const frontendUrl = this.configService.getOrThrow<string>('FRONTEND_URL');
+    const mailFrom = this.configService.getOrThrow<string>('MAIL_FROM');
+    const link = `${frontendUrl}/classrooms/${classroomId}`;
+
+    const aceito = origem === 'pedido-aceito';
+    const subject = aceito
+      ? `Pedido aceito: ${classroomName}`
+      : `Você foi adicionado à turma ${classroomName}`;
+    const introHtml = aceito
+      ? `<p style="margin:0 0 16px;">Seu pedido para entrar na turma <strong>${classroomName}</strong> foi aceito.</p>`
+      : `<p style="margin:0 0 16px;">Seu professor adicionou você à turma <strong>${classroomName}</strong>.</p>`;
+
+    await this.client.transactionalEmails.sendTransacEmail({
+      sender: { email: mailFrom, name: 'RepoIF' },
+      to: [{ email: to, name: studentName }],
+      subject,
+      htmlContent: this.buildEmailTemplate({
+        heading: 'Você entrou na turma 🎉',
+        bodyHtml: `
+          <p style="margin:0 0 16px;">Olá <strong>${studentName}</strong>,</p>
+          ${introHtml}
+          <p style="margin:0 0 16px;">Agora você já pode acessar as disciplinas, os materiais e os trabalhos da turma.</p>
+        `,
+        button: { label: 'Acessar turma', url: link },
+        footnote: 'Acesse o RepoIF para ver o conteúdo da turma.',
+      }),
+    });
+  }
+
   /**
    * Monta o HTML de um e-mail transacional com a identidade visual do RepoIF.
    * Usa estilos inline e layout em tabela para máxima compatibilidade entre

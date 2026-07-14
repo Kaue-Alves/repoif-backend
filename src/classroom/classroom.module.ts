@@ -9,6 +9,7 @@ import { ClassroomSubjectEntity } from 'src/db/entities/classroom-subject.entity
 import { ClassroomInviteEntity } from 'src/db/entities/classroom-invite.entity';
 import { SubjectEntity } from 'src/db/entities/subject.entity';
 import { UserEntity } from 'src/db/entities/user.entity';
+import { MailModule } from 'src/mail/mail.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { UserEntity } from 'src/db/entities/user.entity';
       SubjectEntity,
       UserEntity,
     ]),
+    MailModule,
   ],
   controllers: [ClassroomController],
   providers: [ClassroomService],

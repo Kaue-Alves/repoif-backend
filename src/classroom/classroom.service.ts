@@ -19,6 +19,7 @@ import { UserEntity } from 'src/db/entities/user.entity';
 import { ClassroomMemberStatusEnum } from 'src/common/enums/classroom-member-status.enum';
 import { UserRoleEnum } from 'src/common/enums/user-role.enum';
 import { buildPaginationMeta, Paginated, PaginationQueryDto } from 'src/common/dto/pagination-query.dto';
+import { MailService } from 'src/mail/mail.service';
 
 import {
     AddMemberDto,
@@ -51,11 +52,60 @@ export class ClassroomService {
         private readonly userRepository: Repository<UserEntity>,
 
         private readonly configService: ConfigService,
+
+        private readonly mailService: MailService,
     ) {}
 
     // ----------------------------------------------------------------
     // Helpers
     // ----------------------------------------------------------------
+
+    /**
+     * Avisa o professor de que há um pedido pendente.
+     * Best-effort: falha de e-mail não pode derrubar o pedido do aluno.
+     */
+    private async notifyTeacherOfJoinRequest(classroom: ClassroomEntity, studentId: string) {
+        try {
+            const [teacher, student] = await Promise.all([
+                this.userRepository.findOne({ where: { id: classroom.teacherId } }),
+                this.userRepository.findOne({ where: { id: studentId } }),
+            ]);
+            if (!teacher || !student) return;
+
+            await this.mailService.sendJoinRequestEmail(
+                teacher.email,
+                teacher.username,
+                student.username,
+                classroom.name,
+                classroom.id,
+            );
+        } catch {
+            // Notificação é acessória: o pedido já está registrado.
+        }
+    }
+
+    /**
+     * Avisa o aluno de que entrou na turma — por aceite do pedido dele ou por
+     * adição direta do professor.
+     * Best-effort: falha de e-mail não pode derrubar a ativação do membro.
+     */
+    private async notifyStudentOfMembership(
+        classroom: ClassroomEntity,
+        student: UserEntity,
+        origem: 'pedido-aceito' | 'adicionado-pelo-professor',
+    ) {
+        try {
+            await this.mailService.sendJoinAcceptedEmail(
+                student.email,
+                student.username,
+                classroom.name,
+                classroom.id,
+                origem,
+            );
+        } catch {
+            // Notificação é acessória: o aluno já está ativo na turma.
+        }
+    }
 
     /** Retorna a turma garantindo que o professor informado é o dono. */
     private async getOwnedClassroom(classroomId: string, teacherId: string): Promise<ClassroomEntity> {
@@ -296,7 +346,7 @@ export class ClassroomService {
     // ----------------------------------------------------------------
 
     async addMember(classroomId: string, dto: AddMemberDto, teacherId: string) {
-        await this.getOwnedClassroom(classroomId, teacherId);
+        const classroom = await this.getOwnedClassroom(classroomId, teacherId);
 
         const username = dto.username?.trim();
         const email = dto.email?.trim();
@@ -325,6 +375,8 @@ export class ClassroomService {
             // Havia um pedido pendente: o professor adicionou diretamente, então ativa.
             existing.status = ClassroomMemberStatusEnum.ACTIVE;
             await this.memberRepository.save(existing);
+            // O aluno tinha pedido para entrar — para ele, o pedido foi aceito.
+            await this.notifyStudentOfMembership(classroom, student, 'pedido-aceito');
             return this.toMemberView(existing, student);
         }
 
@@ -333,6 +385,7 @@ export class ClassroomService {
         member.studentId = student.id;
         member.status = ClassroomMemberStatusEnum.ACTIVE;
         const saved = await this.memberRepository.save(member);
+        await this.notifyStudentOfMembership(classroom, student, 'adicionado-pelo-professor');
         return this.toMemberView(saved, student);
     }
 
@@ -355,7 +408,7 @@ export class ClassroomService {
     }
 
     async acceptRequest(classroomId: string, studentId: string, teacherId: string) {
-        await this.getOwnedClassroom(classroomId, teacherId);
+        const classroom = await this.getOwnedClassroom(classroomId, teacherId);
         const member = await this.memberRepository.findOne({
             where: { classroomId, studentId, status: ClassroomMemberStatusEnum.PENDING },
         });
@@ -365,6 +418,9 @@ export class ClassroomService {
         member.status = ClassroomMemberStatusEnum.ACTIVE;
         await this.memberRepository.save(member);
         const student = await this.userRepository.findOne({ where: { id: studentId } });
+        if (student) {
+            await this.notifyStudentOfMembership(classroom, student, 'pedido-aceito');
+        }
         return this.toMemberView(member, student);
     }
 
@@ -437,6 +493,8 @@ export class ClassroomService {
         member.studentId = userId;
         member.status = ClassroomMemberStatusEnum.PENDING;
         await this.memberRepository.save(member);
+
+        await this.notifyTeacherOfJoinRequest(classroom, userId);
 
         return {
             status: ClassroomMemberStatusEnum.PENDING,

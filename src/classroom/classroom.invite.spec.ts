@@ -39,6 +39,7 @@ function buildService() {
     {} as never, // subjects
     {} as never, // users
     configService,
+    {} as never, // mail — createInvite não notifica ninguém
   );
 
   return { service, salvos };
