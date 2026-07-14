@@ -11,6 +11,14 @@ export class UserEntity {
     @Column({type: 'varchar'})
     username!: string;
 
+    /**
+     * Nome de exibição, livre e editável. Diferente do `username`, que é a identidade
+     * (URL do perfil, JWT, UNIQUE) e por isso não muda. Nulo nas contas antigas — a UI
+     * cai no `username` enquanto ninguém preencher.
+     */
+    @Column({ type: 'varchar', length: 120, nullable: true })
+    name?: string | null;
+
     @Column({type: 'varchar'})
     email!: string;
 

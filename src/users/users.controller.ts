@@ -1,5 +1,6 @@
-import { Body, Controller, Get, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { UserDto } from './users.dto';
+import { ChangePasswordDto, UpdateProfileDto } from './update-profile.dto';
 import { ListTeachersDto } from './list-teachers.dto';
 import { UsersService } from './users.service';
 import { AuthGuard } from 'src/auth/auth.guard';
@@ -35,6 +36,21 @@ export class UsersController {
             return [];
         }
         return await this.userService.searchTeachers(query, { userId: request.user.sub, role: request.user.role });
+    }
+
+    /** Altera o próprio perfil. O `username` não é alterável — ver UpdateProfileDto. */
+    @UseGuards(AuthGuard)
+    @Patch('me')
+    async updateMe(@Body() dto: UpdateProfileDto, @Req() request: any) {
+        return await this.userService.updateProfile(request.user.sub, dto);
+    }
+
+    @UseGuards(AuthGuard)
+    @HttpCode(HttpStatus.OK)
+    @Patch('me/password')
+    async changePassword(@Body() dto: ChangePasswordDto, @Req() request: any) {
+        await this.userService.changePassword(request.user.sub, dto);
+        return { message: 'Senha alterada com sucesso.' };
     }
 
     @UseGuards(AuthGuard)

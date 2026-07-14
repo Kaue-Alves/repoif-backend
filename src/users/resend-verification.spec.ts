@@ -48,6 +48,10 @@ function buildService(usuarios: UserEntity[] = [NAO_VERIFICADO, VERIFICADO]) {
         tokenRepository as never,
         {} as never, // subjects
         {} as never, // classroomMembers
+        {} as never, // classrooms
+        {} as never, // files
+        {} as never, // assignments
+        {} as never, // submissions
         mailService,
         {} as never, // subjectService
     );

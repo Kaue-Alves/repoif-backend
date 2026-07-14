@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { UserDto } from './users.dto';
-import { hashSync } from 'bcrypt';
+import { ChangePasswordDto, UpdateProfileDto } from './update-profile.dto';
+import { compareSync, hashSync } from 'bcrypt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { UserEntity } from 'src/db/entities/user.entity';
 import { Repository } from 'typeorm';
@@ -8,6 +9,10 @@ import { randomUUID } from 'crypto';
 import { TokenEntity } from 'src/db/entities/token.entity';
 import { SubjectEntity } from 'src/db/entities/subject.entity';
 import { ClassroomMemberEntity } from 'src/db/entities/classroom-member.entity';
+import { ClassroomEntity } from 'src/db/entities/classroom.entity';
+import { FileEntity } from 'src/db/entities/file.entity';
+import { AssignmentEntity } from 'src/db/entities/assignment.entity';
+import { AssignmentSubmissionEntity } from 'src/db/entities/assignment-submission.entity';
 import { TokenTypeEnum } from 'src/common/enums/token-type.enum';
 import { UserRoleEnum } from 'src/common/enums/user-role.enum';
 import { ClassroomMemberStatusEnum } from 'src/common/enums/classroom-member-status.enum';
@@ -20,6 +25,12 @@ export interface RequestingUser {
     userId: string;
     role: UserRoleEnum;
 }
+
+/** Contadores de atividade exibidos no próprio perfil. Vazio para o admin, que não tem nem disciplina nem turma. */
+export type ProfileStats =
+    | { role: UserRoleEnum.TEACHER; subjects: number; classrooms: number; materials: number; assignments: number }
+    | { role: UserRoleEnum.STUDENT; classrooms: number; submissions: number; pendingAssignments: number }
+    | { role: UserRoleEnum.ADMIN };
 
 /**
  * Validade do link de verificação de e-mail. Os 10 minutos originais venciam antes
@@ -45,10 +56,116 @@ export class UsersService {
         @InjectRepository(ClassroomMemberEntity)
         private readonly classroomMemberRepository: Repository<ClassroomMemberEntity>,
 
+        @InjectRepository(ClassroomEntity)
+        private readonly classroomRepository: Repository<ClassroomEntity>,
+
+        @InjectRepository(FileEntity)
+        private readonly fileRepository: Repository<FileEntity>,
+
+        @InjectRepository(AssignmentEntity)
+        private readonly assignmentRepository: Repository<AssignmentEntity>,
+
+        @InjectRepository(AssignmentSubmissionEntity)
+        private readonly submissionRepository: Repository<AssignmentSubmissionEntity>,
+
         private readonly mailService: MailService,
 
         private readonly subjectService: SubjectService
     ) {}
+
+    // ----------------------------------------------------------------
+    // Perfil próprio
+    // ----------------------------------------------------------------
+
+    /**
+     * Altera o nome de exibição. O `username` não entra aqui de propósito: ele é a
+     * identidade (URL do perfil, JWT), e trocá-lo quebraria links já compartilhados.
+     */
+    async updateProfile(userId: string, dto: UpdateProfileDto) {
+        const user = await this.usersRepository.findOne({ where: { id: userId } });
+        if (!user) {
+            throw new NotFoundException('Usuário não encontrado');
+        }
+
+        if (dto.name !== undefined) {
+            const nome = dto.name.trim();
+            // Nome em branco apaga o nome: a UI volta a exibir o @username.
+            user.name = nome.length > 0 ? nome : null;
+        }
+
+        await this.usersRepository.save(user);
+        return { id: user.id, username: user.username, name: user.name, role: user.role };
+    }
+
+    /** Troca a senha de quem está logado, conferindo a senha atual. */
+    async changePassword(userId: string, dto: ChangePasswordDto): Promise<void> {
+        const user = await this.usersRepository.findOne({ where: { id: userId } });
+        if (!user) {
+            throw new NotFoundException('Usuário não encontrado');
+        }
+
+        if (!compareSync(dto.currentPassword.trim(), user.password)) {
+            throw new BadRequestException('Senha atual incorreta.');
+        }
+
+        const nova = dto.newPassword.trim();
+        if (compareSync(nova, user.password)) {
+            throw new BadRequestException('A nova senha deve ser diferente da atual.');
+        }
+
+        user.password = hashSync(nova, 10);
+        await this.usersRepository.save(user);
+
+        // Um pedido de redefinição pendente vira uma segunda chave para a conta.
+        await this.tokenRepository.delete({ userId: user.id, type: TokenTypeEnum.PASSWORD_RESET });
+    }
+
+    /** Contadores de atividade do próprio perfil, exaustivos por papel. */
+    private async getProfileStats(user: UserEntity): Promise<ProfileStats> {
+        switch (user.role) {
+            case UserRoleEnum.ADMIN:
+                return { role: UserRoleEnum.ADMIN };
+
+            case UserRoleEnum.TEACHER: {
+                const [subjects, classrooms, materials, assignments] = await Promise.all([
+                    this.subjectRepository.count({ where: { teacherId: user.id } }),
+                    this.classroomRepository.count({ where: { teacherId: user.id } }),
+                    this.fileRepository.count({ where: { uploadedBy: user.id } }),
+                    this.assignmentRepository.count({ where: { teacherId: user.id } }),
+                ]);
+                return { role: UserRoleEnum.TEACHER, subjects, classrooms, materials, assignments };
+            }
+
+            case UserRoleEnum.STUDENT: {
+                const [classrooms, submissions, pendingAssignments] = await Promise.all([
+                    this.classroomMemberRepository.count({
+                        where: { studentId: user.id, status: ClassroomMemberStatusEnum.ACTIVE },
+                    }),
+                    this.submissionRepository.count({ where: { studentId: user.id } }),
+                    this.countPendingAssignments(user.id),
+                ]);
+                return { role: UserRoleEnum.STUDENT, classrooms, submissions, pendingAssignments };
+            }
+        }
+    }
+
+    /**
+     * Trabalhos das turmas ativas do aluno que ele ainda não entregou.
+     * O `NOT EXISTS` é o que faz "pendente" significar "sem entrega minha", e não
+     * "sem entrega de ninguém".
+     */
+    private async countPendingAssignments(studentId: string): Promise<number> {
+        return this.assignmentRepository
+            .createQueryBuilder('a')
+            .innerJoin('classroom_subjects', 'cs', 'cs.subjectId = a.subjectId')
+            .innerJoin('classroom_members', 'm', 'm.classroomId = cs.classroomId')
+            .where('m.studentId = :studentId', { studentId })
+            .andWhere('m.status = :status', { status: ClassroomMemberStatusEnum.ACTIVE })
+            .andWhere(
+                'NOT EXISTS (SELECT 1 FROM assignment_submissions s WHERE s."assignmentId" = a.id AND s."studentId" = :studentId)',
+            )
+            .getCount();
+    }
 
     /**
      * Retorna os IDs dos professores com quem o aluno possui algum vínculo,
@@ -268,10 +385,16 @@ export class UsersService {
 
         const subjects = await this.subjectService.findByTeacherId(user.id, isOwner);
 
+        // Contadores só para o dono: o número de disciplinas privadas ou de turmas de um
+        // professor não é da conta de quem visita o perfil dele.
+        const stats = isOwner ? await this.getProfileStats(user) : undefined;
+
         return {
             id: user.id,
             username: user.username,
+            name: user.name ?? null,
             role: user.role,
+            stats,
             subjects: subjects.map(s => ({
                 id: s.id,
                 name: s.name,
