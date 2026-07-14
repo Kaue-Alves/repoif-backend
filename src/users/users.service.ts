@@ -21,6 +21,14 @@ export interface RequestingUser {
     role: UserRoleEnum;
 }
 
+/**
+ * Validade do link de verificação de e-mail. Os 10 minutos originais venciam antes
+ * de muita gente sequer abrir a caixa de entrada; como o link só confirma um endereço
+ * (não dá acesso a nada), 24 horas é o intervalo usual e não afrouxa a segurança.
+ * O token de redefinição de senha continua curto — lá o risco é outro.
+ */
+export const EMAIL_VERIFICATION_TTL_MS = 1000 * 60 * 60 * 24;
+
 @Injectable()
 export class UsersService {
 
@@ -58,6 +66,25 @@ export class UsersService {
         return rows.map(r => r.teacherId);
     }
     
+    /**
+     * Invalida os tokens de verificação anteriores do usuário, emite um novo e o
+     * envia por e-mail. Único ponto que cria token de verificação — cadastro,
+     * recadastro de conta não verificada e reenvio passam todos por aqui.
+     */
+    private async issueEmailVerification(user: Pick<UserEntity, 'id' | 'email' | 'username'>): Promise<void> {
+        await this.tokenRepository.delete({ userId: user.id, type: TokenTypeEnum.EMAIL_VERIFICATION });
+
+        const tokenEntity = new TokenEntity();
+        tokenEntity.userId = user.id;
+        tokenEntity.token = randomUUID();
+        tokenEntity.type = TokenTypeEnum.EMAIL_VERIFICATION;
+        tokenEntity.expiresAt = new Date(Date.now() + EMAIL_VERIFICATION_TTL_MS);
+
+        await this.tokenRepository.save(tokenEntity);
+
+        this.mailService.sendVerificationEmail(user.email, user.username, tokenEntity.token).catch(() => {});
+    }
+
     async create(newUser: UserDto) {
 
         const existingUser = await this.usersRepository.findOne({ where: { username: newUser.username.trim() } })
@@ -72,17 +99,7 @@ export class UsersService {
             existingUser.password = hashSync(newUser.password.trim(), 10)
             await this.usersRepository.save(existingUser)
 
-            await this.tokenRepository.delete({ userId: existingUser.id, type: TokenTypeEnum.EMAIL_VERIFICATION })
-
-            const tokenEntity = new TokenEntity()
-            tokenEntity.userId = existingUser.id
-            tokenEntity.token = randomUUID()
-            tokenEntity.type = TokenTypeEnum.EMAIL_VERIFICATION
-            tokenEntity.expiresAt = new Date(Date.now() + 1000 * 60 * 10)
-
-            await this.tokenRepository.save(tokenEntity)
-
-            this.mailService.sendVerificationEmail(existingUser.email, existingUser.username, tokenEntity.token).catch(() => {})
+            await this.issueEmailVerification(existingUser)
 
             return { id: existingUser.id, username: existingUser.username }
         }
@@ -95,17 +112,31 @@ export class UsersService {
 
         const {id, username, email} = await this.usersRepository.save(dbUser)
 
-        const tokenEntity = new TokenEntity()
-        tokenEntity.userId = id
-        tokenEntity.token = randomUUID()
-        tokenEntity.type = TokenTypeEnum.EMAIL_VERIFICATION
-        tokenEntity.expiresAt = new Date(Date.now() + 1000 * 60 * 10)
-
-        await this.tokenRepository.save(tokenEntity)
-
-        this.mailService.sendVerificationEmail(email, username, tokenEntity.token).catch(() => {});
+        await this.issueEmailVerification({ id, username, email })
 
         return {id, username}
+    }
+
+    /**
+     * Reenvia o link de verificação. Sem isto, quem perde o e-mail (spam) ou deixa o
+     * token vencer fica trancado para sempre: o login barra não verificado e o
+     * recadastro esbarra no username/e-mail já tomados.
+     *
+     * Silencioso quando o e-mail não existe ou a conta já está verificada — responder
+     * coisas diferentes revelaria quais contas existem.
+     */
+    async resendEmailVerification(email: string): Promise<void> {
+        const normalizedEmail = email?.trim();
+        if (!normalizedEmail) {
+            throw new BadRequestException('O campo e-mail é obrigatório.');
+        }
+
+        const user = await this.usersRepository.findOne({ where: { email: normalizedEmail } });
+        if (!user || user.emailVerified) {
+            return;
+        }
+
+        await this.issueEmailVerification(user);
     }
 
     async findAllUsers(): Promise<UserDto[] | null> {

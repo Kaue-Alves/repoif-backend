@@ -5,6 +5,14 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { UsersService } from 'src/users/users.service';
 
+/**
+ * Mensagens de login. O `httpClient` do frontend exibe `data.message` cru ao usuário
+ * (regra 6f), então elas são texto de UI — precisam sair em português e sem jargão.
+ */
+export const INVALID_CREDENTIALS_MESSAGE = 'Usuário ou senha inválidos.';
+export const EMAIL_NOT_VERIFIED_MESSAGE =
+    'Sua conta ainda não foi verificada. Confira seu e-mail ou peça um novo link de verificação.';
+
 @Injectable()
 export class AuthService {
     private jwtExpirationTimeInSeconds: number;
@@ -34,6 +42,10 @@ export class AuthService {
         await this.usersService.requestPasswordReset(email);
     }
 
+    async resendVerification(email: string): Promise<void> {
+        await this.usersService.resendEmailVerification(email);
+    }
+
     async resetPassword(token: string, newPassword: string): Promise<void> {
         await this.usersService.resetPassword(token, newPassword);
     }
@@ -41,19 +53,21 @@ export class AuthService {
     async signIn(username: string, email: string, password: string): Promise<AuthResponseDto> {
 
         if (!username && !email) {
-            throw new UnauthorizedException();
+            throw new UnauthorizedException(INVALID_CREDENTIALS_MESSAGE);
         }
 
         const foundUser = username
             ? await this.usersService.findByUsername(username.trim())
             : await this.usersService.findByEmail(email.trim());
 
+        // Mensagem única para usuário inexistente e senha errada: dizer qual dos dois
+        // falhou entregaria de brinde quais contas existem.
         if (!foundUser || !compareSync(password.trim(), foundUser.password)) {
-            throw new UnauthorizedException();
+            throw new UnauthorizedException(INVALID_CREDENTIALS_MESSAGE);
         }
 
         if (!foundUser.emailVerified) {
-            throw new UnauthorizedException('Email not verified');
+            throw new UnauthorizedException(EMAIL_NOT_VERIFIED_MESSAGE);
         }
 
         const payload = {sub: foundUser.id, username: foundUser.username, email: foundUser.email, role: foundUser.role};
