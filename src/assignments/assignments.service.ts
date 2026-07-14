@@ -130,7 +130,7 @@ export class AssignmentsService {
     /** Gera uma URL presigned para o professor enviar o anexo do trabalho ao R2. */
     async requestAttachmentUploadUrl(dto: RequestAttachmentUploadUrlDto) {
         const key = this.r2Service.buildKey(dto.contentType, dto.filename);
-        const uploadUrl = await this.r2Service.getPresignedUploadUrl(key, dto.contentType);
+        const uploadUrl = await this.r2Service.getPresignedUploadUrl(key, dto.contentType, dto.size);
         return { uploadUrl, key };
     }
 
@@ -357,7 +357,7 @@ export class AssignmentsService {
         await this.assertCanSubmit(assignmentId, studentId);
 
         const key = this.r2Service.buildKey(dto.contentType, dto.filename);
-        const uploadUrl = await this.r2Service.getPresignedUploadUrl(key, dto.contentType);
+        const uploadUrl = await this.r2Service.getPresignedUploadUrl(key, dto.contentType, dto.size);
         return { uploadUrl, key };
     }
 

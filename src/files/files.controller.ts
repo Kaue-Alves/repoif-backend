@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { FilesService } from './files.service';
 import { ConfirmUploadDto, RequestUploadUrlDto, UpdateFileDto } from './file.dto';
 import { AuthGuard } from 'src/auth/auth.guard';
@@ -42,9 +42,13 @@ export class FilesController {
     }
 
     @Get('subject/:subjectId')
-    async findBySubject(@Param('subjectId') subjectId: string, @Req() request: any) {
+    async findBySubject(
+        @Param('subjectId') subjectId: string,
+        @Query('search') search: string | undefined,
+        @Req() request: any,
+    ) {
         const userId = await this.extractUserId(request);
-        return this.filesService.findBySubject(subjectId, userId);
+        return this.filesService.findBySubject(subjectId, userId, search);
     }
 
     @Get(':id/download')
@@ -60,6 +64,20 @@ export class FilesController {
         return this.filesService.update(id, dto, request.user.sub);
     }
 
+    /** Desabilita (exclusão lógica): some da listagem alheia, mas volta com `enable`. */
+    @UseGuards(AuthGuard)
+    @Patch(':id/disable')
+    async disable(@Param('id') id: string, @Req() request: any) {
+        return this.filesService.disable(id, request.user.sub);
+    }
+
+    @UseGuards(AuthGuard)
+    @Patch(':id/enable')
+    async enable(@Param('id') id: string, @Req() request: any) {
+        return this.filesService.enable(id, request.user.sub);
+    }
+
+    /** Exclusão definitiva: apaga o objeto no R2 e o registro. Não tem volta. */
     @UseGuards(AuthGuard)
     @Delete(':id')
     async remove(@Param('id') id: string, @Req() request: any) {

@@ -1,5 +1,7 @@
-import { IsBoolean, IsDateString, IsNumber, IsOptional, IsString, IsUUID, MaxLength, ValidateNested } from 'class-validator';
+import { IsBoolean, IsDateString, IsInt, IsOptional, IsString, IsUUID, Max, MaxLength, Min, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
+import { IsSafeFilename } from 'src/common/validators/safe-filename.validator';
+import { MAX_UPLOAD_BYTES, MAX_UPLOAD_MESSAGE } from 'src/common/upload-limits';
 
 /** Metadados de um anexo já enviado ao R2 (key obtida via upload-url). */
 export class AttachmentDto {
@@ -9,13 +11,16 @@ export class AttachmentDto {
 
     @IsString()
     @MaxLength(255)
+    @IsSafeFilename()
     attachmentName!: string;
 
     @IsString()
     @MaxLength(100)
     attachmentMimeType!: string;
 
-    @IsNumber()
+    @IsInt()
+    @Min(1)
+    @Max(MAX_UPLOAD_BYTES, { message: MAX_UPLOAD_MESSAGE })
     attachmentSize!: number;
 }
 
@@ -70,21 +75,33 @@ export class UpdateAssignmentDto {
 export class RequestAttachmentUploadUrlDto {
     @IsString()
     @MaxLength(255)
+    @IsSafeFilename()
     filename!: string;
 
     @IsString()
     @MaxLength(100)
     contentType!: string;
+
+    @IsInt()
+    @Min(1)
+    @Max(MAX_UPLOAD_BYTES, { message: MAX_UPLOAD_MESSAGE })
+    size!: number;
 }
 
 export class RequestSubmissionUploadUrlDto {
     @IsString()
     @MaxLength(255)
+    @IsSafeFilename()
     filename!: string;
 
     @IsString()
     @MaxLength(100)
     contentType!: string;
+
+    @IsInt()
+    @Min(1)
+    @Max(MAX_UPLOAD_BYTES, { message: MAX_UPLOAD_MESSAGE })
+    size!: number;
 }
 
 export class ConfirmSubmissionDto {
@@ -94,12 +111,15 @@ export class ConfirmSubmissionDto {
 
     @IsString()
     @MaxLength(255)
+    @IsSafeFilename()
     originalName!: string;
 
     @IsString()
     @MaxLength(100)
     mimeType!: string;
 
-    @IsNumber()
+    @IsInt()
+    @Min(1)
+    @Max(MAX_UPLOAD_BYTES, { message: MAX_UPLOAD_MESSAGE })
     size!: number;
 }

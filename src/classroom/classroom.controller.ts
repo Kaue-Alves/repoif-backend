@@ -7,7 +7,13 @@ import { UserRoleEnum } from 'src/common/enums/user-role.enum';
 import { PaginationQueryDto } from 'src/common/dto/pagination-query.dto';
 
 import { ClassroomService } from './classroom.service';
-import { AddMemberDto, AddSubjectToClassroomDto, CreateClassroomDto, UpdateClassroomDto } from './classroom.dto';
+import {
+    AddMemberDto,
+    AddSubjectToClassroomDto,
+    CreateClassroomDto,
+    CreateInviteDto,
+    UpdateClassroomDto,
+} from './classroom.dto';
 
 @UseGuards(AuthGuard, RolesGuard)
 @Controller('classrooms')
@@ -90,8 +96,8 @@ export class ClassroomController {
 
     @Roles(UserRoleEnum.TEACHER)
     @Post(':id/invites')
-    async createInvite(@Param('id') id: string, @Req() req: any) {
-        return await this.classroomService.createInvite(id, req.user.sub);
+    async createInvite(@Param('id') id: string, @Body() dto: CreateInviteDto, @Req() req: any) {
+        return await this.classroomService.createInvite(id, req.user.sub, dto);
     }
 
     @Post('join/:token')

@@ -28,11 +28,23 @@ export class R2Service {
         return `${folder}/${Date.now()}-${filename}`;
     }
 
-    async getPresignedUploadUrl(key: string, contentType: string, expiresIn = 300): Promise<string> {
+    /**
+     * `size` entra como `ContentLength` e, com isso, passa a fazer parte dos cabeçalhos
+     * assinados (`X-Amz-SignedHeaders: content-length;host`). O próprio R2 então recusa um
+     * corpo de tamanho diferente do declarado — o limite de upload deixa de depender de o
+     * cliente ser honesto ao pedir a URL.
+     */
+    async getPresignedUploadUrl(
+        key: string,
+        contentType: string,
+        size: number,
+        expiresIn = 300,
+    ): Promise<string> {
         const command = new PutObjectCommand({
             Bucket: this.bucket,
             Key: key,
             ContentType: contentType,
+            ContentLength: size,
         });
         return getSignedUrl(this.s3, command, { expiresIn });
     }

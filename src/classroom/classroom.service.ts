@@ -20,10 +20,14 @@ import { ClassroomMemberStatusEnum } from 'src/common/enums/classroom-member-sta
 import { UserRoleEnum } from 'src/common/enums/user-role.enum';
 import { buildPaginationMeta, Paginated, PaginationQueryDto } from 'src/common/dto/pagination-query.dto';
 
-import { AddMemberDto, AddSubjectToClassroomDto, CreateClassroomDto, UpdateClassroomDto } from './classroom.dto';
-
-/** Validade do link de convite: 30 minutos. */
-const INVITE_TTL_MS = 30 * 60 * 1000;
+import {
+    AddMemberDto,
+    AddSubjectToClassroomDto,
+    CreateClassroomDto,
+    CreateInviteDto,
+    DEFAULT_INVITE_TTL_MINUTES,
+    UpdateClassroomDto,
+} from './classroom.dto';
 
 @Injectable()
 export class ClassroomService {
@@ -380,13 +384,15 @@ export class ClassroomService {
     // Convites por link
     // ----------------------------------------------------------------
 
-    async createInvite(classroomId: string, teacherId: string) {
+    async createInvite(classroomId: string, teacherId: string, dto: CreateInviteDto = {}) {
         await this.getOwnedClassroom(classroomId, teacherId);
+
+        const ttlMinutes = dto.expiresInMinutes ?? DEFAULT_INVITE_TTL_MINUTES;
 
         const invite = new ClassroomInviteEntity();
         invite.classroomId = classroomId;
         invite.token = randomUUID();
-        invite.expiresAt = new Date(Date.now() + INVITE_TTL_MS);
+        invite.expiresAt = new Date(Date.now() + ttlMinutes * 60 * 1000);
         const saved = await this.inviteRepository.save(invite);
 
         const frontendUrl = this.configService.get<string>('FRONTEND_URL') ?? '';
