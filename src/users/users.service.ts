@@ -383,7 +383,7 @@ export class UsersService {
             }
         }
 
-        const subjects = await this.subjectService.findByTeacherId(user.id, isOwner);
+        const subjects = await this.subjectService.findVisibleInTeacherProfile(user.id, requester, isOwner);
 
         // Contadores só para o dono: o número de disciplinas privadas ou de turmas de um
         // professor não é da conta de quem visita o perfil dele.

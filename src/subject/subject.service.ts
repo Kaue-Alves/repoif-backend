@@ -5,6 +5,7 @@ import { Repository } from 'typeorm';
 import { SubjectDto } from './subject.dto';
 import { UserEntity } from 'src/db/entities/user.entity';
 import { UserRoleEnum } from 'src/common/enums/user-role.enum';
+import { ClassroomMemberStatusEnum } from 'src/common/enums/classroom-member-status.enum';
 import { ClassroomService } from 'src/classroom/classroom.service';
 import { buildPaginationMeta, Paginated, PaginationQueryDto } from 'src/common/dto/pagination-query.dto';
 
@@ -62,6 +63,43 @@ async create(subjectDto: SubjectDto, teacherId: string): Promise<SubjectEntity> 
             query.isPublic = true;
         }
         return await this.subjectRepository.find({ where: query });
+    }
+
+    /**
+     * Disciplinas exibidas no perfil de um professor:
+     * - o dono vê todas;
+     * - alunos veem públicas e privadas vinculadas às turmas ativas deles;
+     * - demais visitantes veem só públicas.
+     */
+    async findVisibleInTeacherProfile(
+        teacherId: string,
+        viewer: { userId: string; role: UserRoleEnum },
+        isOwner: boolean,
+    ): Promise<SubjectEntity[]> {
+        const qb = this.subjectRepository
+            .createQueryBuilder('subject')
+            .where('subject.teacherId = :teacherId', { teacherId })
+            .orderBy('subject.name', 'ASC')
+            .distinct(true);
+
+        if (isOwner) {
+            return await qb.getMany();
+        }
+
+        if (viewer.role === UserRoleEnum.STUDENT) {
+            qb.leftJoin('classroom_subjects', 'cs', 'cs.subjectId = subject.id')
+                .leftJoin(
+                    'classroom_members',
+                    'member',
+                    'member.classroomId = cs.classroomId AND member.studentId = :studentId AND member.status = :status',
+                    { studentId: viewer.userId, status: ClassroomMemberStatusEnum.ACTIVE },
+                )
+                .andWhere('(subject.isPublic = true OR member.id IS NOT NULL)');
+        } else {
+            qb.andWhere('subject.isPublic = true');
+        }
+
+        return await qb.getMany();
     }
 
     async findOne(id: string, teacherId: string): Promise<SubjectEntity> {
@@ -139,4 +177,3 @@ async create(subjectDto: SubjectDto, teacherId: string): Promise<SubjectEntity> 
         }
     }
 }
-

@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { compareSync, hashSync } from 'bcrypt';
 
 import { UserEntity } from 'src/db/entities/user.entity';
@@ -150,5 +150,113 @@ describe('UsersService.changePassword()', () => {
         await service.changePassword(user.id, { currentPassword: SENHA_ATUAL, newPassword: nova });
 
         expect(apagados).toContainEqual({ userId: user.id, type: TokenTypeEnum.PASSWORD_RESET });
+    });
+});
+
+function queryDeProfessoresVinculados(ids: string[]) {
+    const qb = {
+        innerJoin: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn(async () => ids.map(teacherId => ({ teacherId }))),
+    };
+    return qb;
+}
+
+function buildProfileService({
+    users,
+    linkedTeacherIds,
+    subjects,
+}: {
+    users: UserEntity[];
+    linkedTeacherIds: string[];
+    subjects: { id: string; name: string; description?: string | null; isPublic: boolean }[];
+}) {
+    const usersRepository = {
+        findOne: async ({ where }: { where: { id?: string; username?: string } }) =>
+            users.find(u => (where.id ? u.id === where.id : u.username === where.username)) ?? null,
+    };
+
+    const classroomMemberRepository = {
+        createQueryBuilder: jest.fn(() => queryDeProfessoresVinculados(linkedTeacherIds)),
+    };
+
+    const subjectService = {
+        findVisibleInTeacherProfile: jest.fn(async () => subjects),
+    };
+
+    const service = new UsersService(
+        usersRepository as never,
+        {} as never, // tokens
+        {} as never, // subjects
+        classroomMemberRepository as never,
+        {} as never, // classrooms
+        {} as never, // files
+        {} as never, // assignments
+        {} as never, // submissions
+        {} as never, // mail
+        subjectService as never,
+    );
+
+    return { service, subjectService };
+}
+
+describe('UsersService.getProfile()', () => {
+    const professor = {
+        ...novoUsuario(),
+        id: 'teacher-1',
+        username: 'ana',
+        role: UserRoleEnum.TEACHER,
+    } as UserEntity;
+
+    const aluno = {
+        ...novoUsuario(),
+        id: 'student-1',
+        username: 'joao',
+        role: UserRoleEnum.STUDENT,
+    } as UserEntity;
+
+    it('lista privadas do professor quando o aluno participa de turma vinculada', async () => {
+        const { service, subjectService } = buildProfileService({
+            users: [professor, aluno],
+            linkedTeacherIds: [professor.id],
+            subjects: [
+                { id: 'publica-1', name: 'Algoritmos', description: null, isPublic: true },
+                { id: 'privada-1', name: 'Banco de Dados - Turma A', description: null, isPublic: false },
+            ],
+        });
+
+        const perfil = await service.getProfile(professor.username, {
+            userId: aluno.id,
+            role: UserRoleEnum.STUDENT,
+        });
+
+        expect(subjectService.findVisibleInTeacherProfile).toHaveBeenCalledWith(
+            professor.id,
+            { userId: aluno.id, role: UserRoleEnum.STUDENT },
+            false,
+        );
+        expect(perfil.subjects).toEqual([
+            { id: 'publica-1', name: 'Algoritmos', description: null, isPublic: true },
+            { id: 'privada-1', name: 'Banco de Dados - Turma A', description: null, isPublic: false },
+        ]);
+    });
+
+    it('bloqueia aluno sem vínculo antes de listar disciplinas privadas', async () => {
+        const { service, subjectService } = buildProfileService({
+            users: [professor, aluno],
+            linkedTeacherIds: [],
+            subjects: [],
+        });
+
+        await expect(
+            service.getProfile(professor.username, {
+                userId: aluno.id,
+                role: UserRoleEnum.STUDENT,
+            }),
+        ).rejects.toBeInstanceOf(ForbiddenException);
+
+        expect(subjectService.findVisibleInTeacherProfile).not.toHaveBeenCalled();
     });
 });
