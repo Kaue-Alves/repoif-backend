@@ -6,7 +6,7 @@ import {
     NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { DataSource, In, Repository } from 'typeorm';
 
 import { AssignmentEntity } from 'src/db/entities/assignment.entity';
 import { AssignmentSubmissionEntity } from 'src/db/entities/assignment-submission.entity';
@@ -15,6 +15,7 @@ import { UserEntity } from 'src/db/entities/user.entity';
 import { R2Service } from 'src/r2/r2.service';
 import { MailService } from 'src/mail/mail.service';
 import { ClassroomService } from 'src/classroom/classroom.service';
+import { StorageCleanupService } from 'src/storage-cleanup/storage-cleanup.service';
 
 import {
     ConfirmSubmissionDto,
@@ -40,8 +41,10 @@ export class AssignmentsService {
         private readonly userRepository: Repository<UserEntity>,
 
         private readonly r2Service: R2Service,
+        private readonly storageCleanupService: StorageCleanupService,
         private readonly mailService: MailService,
         private readonly classroomService: ClassroomService,
+        private readonly dataSource: DataSource,
     ) {}
 
     // ----------------------------------------------------------------
@@ -70,20 +73,24 @@ export class AssignmentsService {
         return assignment;
     }
 
-    /** Garante que o usuário pode ver a disciplina (dono ou aluno ativo de turma que a contém). */
-    private async assertSubjectViewer(subjectId: string, userId: string): Promise<{ subject: SubjectEntity; isOwner: boolean }> {
+    /** Garante que o usuário pode ver a disciplina e informa se ele pode realizar entregas. */
+    private async assertSubjectViewer(
+        subjectId: string,
+        userId: string,
+    ): Promise<{ subject: SubjectEntity; isOwner: boolean; isMember: boolean }> {
         const subject = await this.subjectRepository.findOne({ where: { id: subjectId } });
         if (!subject) {
             throw new NotFoundException('Disciplina não encontrada');
         }
         const isOwner = subject.teacherId === userId;
+        let isMember = false;
         if (!isOwner) {
-            const hasAccess = await this.classroomService.isSubjectAccessibleToMember(subjectId, userId);
-            if (!hasAccess) {
+            isMember = await this.classroomService.isSubjectAccessibleToMember(subjectId, userId);
+            if (!subject.isPublic && !isMember) {
                 throw new ForbiddenException('Você não tem acesso a esta disciplina');
             }
         }
-        return { subject, isOwner };
+        return { subject, isOwner, isMember };
     }
 
     /** Valida a data limite: precisa ser válida e no mínimo um dia após a data atual. */
@@ -128,16 +135,38 @@ export class AssignmentsService {
     // ----------------------------------------------------------------
 
     /** Gera uma URL presigned para o professor enviar o anexo do trabalho ao R2. */
-    async requestAttachmentUploadUrl(dto: RequestAttachmentUploadUrlDto) {
+    async requestAttachmentUploadUrl(dto: RequestAttachmentUploadUrlDto, teacherId: string) {
+        await this.getSubjectOwnedBy(dto.subjectId, teacherId);
         const key = this.r2Service.buildKey(dto.contentType, dto.filename);
         const uploadUrl = await this.r2Service.getPresignedUploadUrl(key, dto.contentType, dto.size);
-        return { uploadUrl, key };
+        const uploadProof = this.r2Service.createUploadProof({
+            userId: teacherId,
+            purpose: 'assignment-attachment',
+            scopeId: dto.subjectId,
+            key,
+            filename: dto.filename,
+            contentType: dto.contentType,
+            size: dto.size,
+        });
+        return { uploadUrl, key, uploadProof };
     }
 
     async create(dto: CreateAssignmentDto, teacherId: string) {
         const subject = await this.getSubjectOwnedBy(dto.subjectId, teacherId);
 
         const dueDate = this.parseDueDate(dto.dueDate);
+
+        if (dto.attachment) {
+            await this.r2Service.verifyUploadedObject(dto.attachment.uploadProof, {
+                userId: teacherId,
+                purpose: 'assignment-attachment',
+                scopeId: dto.subjectId,
+                key: dto.attachment.attachmentKey,
+                filename: dto.attachment.attachmentName,
+                contentType: dto.attachment.attachmentMimeType,
+                size: dto.attachment.attachmentSize,
+            });
+        }
 
         const assignment = new AssignmentEntity();
         assignment.subjectId = subject.id;
@@ -183,7 +212,7 @@ export class AssignmentsService {
     }
 
     async listBySubject(subjectId: string, userId: string) {
-        const { isOwner } = await this.assertSubjectViewer(subjectId, userId);
+        const { isOwner, isMember } = await this.assertSubjectViewer(subjectId, userId);
 
         const assignments = await this.assignmentRepository.find({
             where: { subjectId },
@@ -225,7 +254,10 @@ export class AssignmentsService {
                 ...a,
                 submitted: !!sub,
                 mySubmission: sub ? this.submissionView(sub, a.dueDate) : null,
-                canSubmit: !sub || sub.resubmitAllowed,
+                canSubmit:
+                    isMember &&
+                    a.dueDate.getTime() >= Date.now() &&
+                    (!sub || sub.resubmitAllowed),
             };
         });
     }
@@ -235,7 +267,7 @@ export class AssignmentsService {
         if (!assignment) {
             throw new NotFoundException('Trabalho não encontrado');
         }
-        const { subject, isOwner } = await this.assertSubjectViewer(assignment.subjectId, userId);
+        const { subject, isOwner, isMember } = await this.assertSubjectViewer(assignment.subjectId, userId);
 
         const base = {
             ...assignment,
@@ -254,7 +286,10 @@ export class AssignmentsService {
             ...base,
             submitted: !!sub,
             mySubmission: sub ? this.submissionView(sub, assignment.dueDate) : null,
-            canSubmit: !sub || sub.resubmitAllowed,
+            canSubmit:
+                isMember &&
+                assignment.dueDate.getTime() >= Date.now() &&
+                (!sub || sub.resubmitAllowed),
         };
     }
 
@@ -277,10 +312,21 @@ export class AssignmentsService {
             }
         }
 
-        // Substituição ou remoção do anexo.
+        // O objeto antigo só é apagado depois de a nova referência estar persistida.
+        // A chave nova ainda não é confiável até o bloco de upload vinculá-la à solicitação.
+        let attachmentKeyToDelete: string | null = null;
         if (dto.attachment) {
-            if (assignment.attachmentKey) {
-                await this.r2Service.deleteObject(assignment.attachmentKey).catch(() => {});
+            await this.r2Service.verifyUploadedObject(dto.attachment.uploadProof, {
+                userId: teacherId,
+                purpose: 'assignment-attachment',
+                scopeId: assignment.subjectId,
+                key: dto.attachment.attachmentKey,
+                filename: dto.attachment.attachmentName,
+                contentType: dto.attachment.attachmentMimeType,
+                size: dto.attachment.attachmentSize,
+            });
+            if (assignment.attachmentKey && assignment.attachmentKey !== dto.attachment.attachmentKey) {
+                attachmentKeyToDelete = assignment.attachmentKey;
             }
             assignment.attachmentKey = dto.attachment.attachmentKey;
             assignment.attachmentName = dto.attachment.attachmentName;
@@ -288,7 +334,7 @@ export class AssignmentsService {
             assignment.attachmentSize = dto.attachment.attachmentSize;
         } else if (dto.removeAttachment) {
             if (assignment.attachmentKey) {
-                await this.r2Service.deleteObject(assignment.attachmentKey).catch(() => {});
+                attachmentKeyToDelete = assignment.attachmentKey;
             }
             assignment.attachmentKey = null;
             assignment.attachmentName = null;
@@ -296,20 +342,34 @@ export class AssignmentsService {
             assignment.attachmentSize = null;
         }
 
-        return this.assignmentRepository.save(assignment);
+        const saved = attachmentKeyToDelete
+            ? await this.dataSource.transaction(async manager => {
+                const result = await manager.getRepository(AssignmentEntity).save(assignment);
+                await this.storageCleanupService.enqueue([attachmentKeyToDelete], manager);
+                return result;
+            })
+            : await this.assignmentRepository.save(assignment);
+
+        if (attachmentKeyToDelete) {
+            await this.storageCleanupService.processKeys([attachmentKeyToDelete]);
+        }
+        return saved;
     }
 
     async remove(assignmentId: string, teacherId: string): Promise<void> {
         const assignment = await this.getAssignmentOwnedBy(assignmentId, teacherId);
 
-        // Remove os arquivos das entregas e o anexo do trabalho no R2.
+        // Primeiro remove os metadados. Se o banco falhar, nenhum objeto válido é perdido.
         const submissions = await this.submissionRepository.find({ where: { assignmentId } });
-        await Promise.all(submissions.map(s => this.r2Service.deleteObject(s.key).catch(() => {})));
-        if (assignment.attachmentKey) {
-            await this.r2Service.deleteObject(assignment.attachmentKey).catch(() => {});
-        }
-
-        await this.assignmentRepository.delete(assignmentId); // cascade remove as entregas
+        const keys = [
+            ...submissions.map(submission => submission.key),
+            ...(assignment.attachmentKey ? [assignment.attachmentKey] : []),
+        ];
+        await this.dataSource.transaction(async manager => {
+            await this.storageCleanupService.enqueue(keys, manager);
+            await manager.getRepository(AssignmentEntity).delete(assignmentId);
+        });
+        await this.storageCleanupService.processKeys(keys);
     }
 
     /** Download do anexo do trabalho (dono ou aluno com acesso à disciplina). */
@@ -358,24 +418,53 @@ export class AssignmentsService {
 
         const key = this.r2Service.buildKey(dto.contentType, dto.filename);
         const uploadUrl = await this.r2Service.getPresignedUploadUrl(key, dto.contentType, dto.size);
-        return { uploadUrl, key };
+        const uploadProof = this.r2Service.createUploadProof({
+            userId: studentId,
+            purpose: 'assignment-submission',
+            scopeId: assignmentId,
+            key,
+            filename: dto.filename,
+            contentType: dto.contentType,
+            size: dto.size,
+        });
+        return { uploadUrl, key, uploadProof };
     }
 
     async confirmSubmission(assignmentId: string, dto: ConfirmSubmissionDto, studentId: string) {
         const { assignment, existing } = await this.assertCanSubmit(assignmentId, studentId);
+        await this.r2Service.verifyUploadedObject(dto.uploadProof, {
+            userId: studentId,
+            purpose: 'assignment-submission',
+            scopeId: assignmentId,
+            key: dto.key,
+            filename: dto.originalName,
+            contentType: dto.mimeType,
+            size: dto.size,
+        });
 
         let submission: AssignmentSubmissionEntity;
 
         if (existing) {
-            // Reenvio autorizado: apaga o arquivo anterior e substitui.
-            await this.r2Service.deleteObject(existing.key).catch(() => {});
+            // Reenvio autorizado: persiste a referência nova antes de apagar a anterior.
+            const previousKey = existing.key;
             existing.key = dto.key;
             existing.originalName = dto.originalName;
             existing.mimeType = dto.mimeType;
             existing.size = dto.size;
             existing.submittedAt = new Date();
             existing.resubmitAllowed = false;
-            submission = await this.submissionRepository.save(existing);
+            if (previousKey !== dto.key) {
+                submission = await this.dataSource.transaction(async manager => {
+                    const result = await manager
+                        .getRepository(AssignmentSubmissionEntity)
+                        .save(existing);
+                    await this.storageCleanupService.enqueue([previousKey], manager);
+                    return result;
+                });
+                await this.storageCleanupService.processKeys([previousKey]);
+            } else {
+                submission = await this.submissionRepository.save(existing);
+            }
         } else {
             const created = new AssignmentSubmissionEntity();
             created.assignmentId = assignmentId;
@@ -386,7 +475,17 @@ export class AssignmentsService {
             created.size = dto.size;
             created.resubmitAllowed = false;
             created.submittedAt = new Date();
-            submission = await this.submissionRepository.save(created);
+            try {
+                submission = await this.submissionRepository.save(created);
+            } catch (error) {
+                const details = error as { code?: string; driverError?: { code?: string } };
+                if (details.code === '23505' || details.driverError?.code === '23505') {
+                    throw new ConflictException(
+                        'Você já entregou este trabalho. Peça ao professor para permitir reenvio.',
+                    );
+                }
+                throw error;
+            }
         }
 
         // Notifica o professor por e-mail (best-effort).

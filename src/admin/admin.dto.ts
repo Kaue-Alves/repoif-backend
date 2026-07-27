@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsEmail, IsEnum, IsInt, IsOptional, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
+import { IsEmail, IsEnum, IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
 
 import { UserRoleEnum } from 'src/common/enums/user-role.enum';
 import { ReportStatusEnum } from 'src/common/enums/report-status.enum';
@@ -60,7 +60,7 @@ export class ListUsersQueryDto {
     role?: UserRoleEnum;
 
     @IsOptional()
-    @IsString()
+    @IsIn(['true', 'false'])
     includeDeleted?: string;
 }
 
@@ -83,7 +83,7 @@ export class ListFilesQueryDto {
     search?: string;
 
     @IsOptional()
-    @IsString()
+    @IsIn(['true', 'false'])
     includeDeleted?: string;
 }
 

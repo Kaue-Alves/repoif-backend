@@ -38,9 +38,10 @@ describeIfDb('FilesService (integração com Postgres)', () => {
   let dataSource: DataSource;
   let subjectId: string;
 
+  const deleteObject = jest.fn(async (_key: string) => undefined);
   const r2Stub: Partial<R2Service> = {
     getPresignedDownloadUrl: jest.fn(async (key: string) => `https://r2.test/${key}?assinado`),
-    deleteObject: jest.fn(async () => undefined),
+    deleteObject,
   };
 
   beforeAll(async () => {
@@ -71,6 +72,7 @@ describeIfDb('FilesService (integração com Postgres)', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    deleteObject.mockResolvedValue(undefined);
     await files.clear();
     await subjects.clear();
     await users.clear();
@@ -307,6 +309,18 @@ describeIfDb('FilesService (integração com Postgres)', () => {
       const id = await idDe('Aula 01 - Listas.pdf');
       await expect(service.remove(id, OTHER_TEACHER)).rejects.toBeInstanceOf(NotFoundException);
       expect(r2Stub.deleteObject).not.toHaveBeenCalled();
+    });
+
+    it('FIL-16 preserva os metadados se o R2 falha e permite tentar novamente', async () => {
+      const id = await idDe('Aula 01 - Listas.pdf');
+      deleteObject.mockRejectedValueOnce(new Error('R2 unavailable'));
+
+      await expect(service.remove(id, TEACHER)).rejects.toThrow('R2 unavailable');
+      expect(await files.findOne({ where: { id }, withDeleted: true })).not.toBeNull();
+
+      await expect(service.remove(id, TEACHER)).resolves.toBeUndefined();
+      expect(deleteObject).toHaveBeenNthCalledWith(2, 'k/1');
+      expect(await files.findOne({ where: { id }, withDeleted: true })).toBeNull();
     });
   });
 });

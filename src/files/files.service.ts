@@ -46,13 +46,31 @@ export class FilesService {
 
         const key = this.r2Service.buildKey(dto.contentType, dto.filename);
         const uploadUrl = await this.r2Service.getPresignedUploadUrl(key, dto.contentType, dto.size);
+        const uploadProof = this.r2Service.createUploadProof({
+            userId,
+            purpose: 'subject-file',
+            scopeId: dto.subjectId,
+            key,
+            filename: dto.filename,
+            contentType: dto.contentType,
+            size: dto.size,
+        });
 
-        return { uploadUrl, key };
+        return { uploadUrl, key, uploadProof };
     }
 
     async confirmUpload(dto: ConfirmUploadDto, userId: string): Promise<FileEntity> {
         await this.assertTeacher(userId);
         await this.assertSubjectOwner(dto.subjectId, userId);
+        await this.r2Service.verifyUploadedObject(dto.uploadProof, {
+            userId,
+            purpose: 'subject-file',
+            scopeId: dto.subjectId,
+            key: dto.key,
+            filename: dto.originalName,
+            contentType: dto.mimeType,
+            size: dto.size,
+        });
 
         const file = new FileEntity();
         file.originalName = dto.originalName;

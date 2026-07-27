@@ -1,10 +1,18 @@
-import { Column, CreateDateColumn, Entity, PrimaryGeneratedColumn, UpdateDateColumn } from 'typeorm';
+import { Column, CreateDateColumn, Entity, Index, PrimaryGeneratedColumn, UpdateDateColumn } from 'typeorm';
 
 import { ReportReasonEnum } from 'src/common/enums/report-reason.enum';
 import { ReportStatusEnum } from 'src/common/enums/report-status.enum';
 import { ReportTargetTypeEnum } from 'src/common/enums/report-target-type.enum';
 
 @Entity({ name: 'reports' })
+@Index('reports_uq_pending_user', ['reporterId', 'targetUserId'], {
+    unique: true,
+    where: `"status" = 'PENDING' AND "targetUserId" IS NOT NULL`,
+})
+@Index('reports_uq_pending_file', ['reporterId', 'targetFileId'], {
+    unique: true,
+    where: `"status" = 'PENDING' AND "targetFileId" IS NOT NULL`,
+})
 export class ReportEntity {
 
     @PrimaryGeneratedColumn('uuid')

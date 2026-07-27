@@ -60,6 +60,19 @@ export class ClassroomService {
     // Helpers
     // ----------------------------------------------------------------
 
+    private isUniqueViolation(error: unknown): boolean {
+        const details = error as { code?: string; driverError?: { code?: string } };
+        return details?.code === '23505' || details?.driverError?.code === '23505';
+    }
+
+    private normalizedRequired(value: string, field: string): string {
+        const normalized = value.trim();
+        if (!normalized) {
+            throw new BadRequestException(`${field} não pode ficar vazio`);
+        }
+        return normalized;
+    }
+
     /**
      * Avisa o professor de que há um pedido pendente.
      * Best-effort: falha de e-mail não pode derrubar o pedido do aluno.
@@ -188,7 +201,7 @@ export class ClassroomService {
         }
 
         const classroom = new ClassroomEntity();
-        classroom.name = dto.name.trim();
+        classroom.name = this.normalizedRequired(dto.name, 'Nome da turma');
         classroom.description = dto.description?.trim();
         classroom.teacherId = teacherId;
 
@@ -213,7 +226,7 @@ export class ClassroomService {
 
         if (role === UserRoleEnum.TEACHER) {
             qb.where('classroom.teacherId = :userId', { userId });
-        } else {
+        } else if (role === UserRoleEnum.STUDENT) {
             const memberships = await this.memberRepository.find({
                 where: { studentId: userId, status: ClassroomMemberStatusEnum.ACTIVE },
             });
@@ -222,6 +235,8 @@ export class ClassroomService {
                 return { data: [], meta: buildPaginationMeta(page, limit, 0) };
             }
             qb.where('classroom.id IN (:...ids)', { ids });
+        } else {
+            throw new ForbiddenException('Este papel não possui turmas');
         }
 
         if (search) {
@@ -238,7 +253,7 @@ export class ClassroomService {
 
     async update(classroomId: string, dto: UpdateClassroomDto, teacherId: string): Promise<ClassroomEntity> {
         const classroom = await this.getOwnedClassroom(classroomId, teacherId);
-        if (dto.name !== undefined) classroom.name = dto.name.trim();
+        if (dto.name !== undefined) classroom.name = this.normalizedRequired(dto.name, 'Nome da turma');
         if (dto.description !== undefined) classroom.description = dto.description?.trim();
         return await this.classroomRepository.save(classroom);
     }
@@ -255,6 +270,12 @@ export class ClassroomService {
     async addSubject(classroomId: string, dto: AddSubjectToClassroomDto, teacherId: string) {
         await this.getOwnedClassroom(classroomId, teacherId);
 
+        const hasSubjectId = !!dto.subjectId;
+        const name = dto.name?.trim();
+        if (hasSubjectId === !!name) {
+            throw new BadRequestException('Informe somente subjectId ou o name de uma nova disciplina');
+        }
+
         let subject: SubjectEntity;
 
         if (dto.subjectId) {
@@ -267,11 +288,8 @@ export class ClassroomService {
             }
             subject = existing;
         } else {
-            if (!dto.name || !dto.name.trim()) {
-                throw new BadRequestException('Informe subjectId de uma disciplina existente ou o name de uma nova');
-            }
             const newSubject = new SubjectEntity();
-            newSubject.name = dto.name.trim();
+            newSubject.name = name!;
             newSubject.description = dto.description?.trim();
             newSubject.teacherId = teacherId;
             newSubject.isPublic = false; // disciplina de turma privada
@@ -288,7 +306,14 @@ export class ClassroomService {
         const link = new ClassroomSubjectEntity();
         link.classroomId = classroomId;
         link.subjectId = subject.id;
-        await this.classroomSubjectRepository.save(link);
+        try {
+            await this.classroomSubjectRepository.save(link);
+        } catch (error) {
+            if (this.isUniqueViolation(error)) {
+                throw new ConflictException('Esta disciplina já está vinculada à turma');
+            }
+            throw error;
+        }
 
         return subject;
     }
@@ -349,9 +374,9 @@ export class ClassroomService {
         const classroom = await this.getOwnedClassroom(classroomId, teacherId);
 
         const username = dto.username?.trim();
-        const email = dto.email?.trim();
-        if (!username && !email) {
-            throw new BadRequestException('Informe o nome de usuário ou o email do aluno');
+        const email = dto.email?.trim().toLowerCase();
+        if (!!username === !!email) {
+            throw new BadRequestException('Informe somente o nome de usuário ou o email do aluno');
         }
 
         const student = username
@@ -384,7 +409,15 @@ export class ClassroomService {
         member.classroomId = classroomId;
         member.studentId = student.id;
         member.status = ClassroomMemberStatusEnum.ACTIVE;
-        const saved = await this.memberRepository.save(member);
+        let saved: ClassroomMemberEntity;
+        try {
+            saved = await this.memberRepository.save(member);
+        } catch (error) {
+            if (this.isUniqueViolation(error)) {
+                throw new ConflictException('Este aluno já é membro ou possui pedido pendente');
+            }
+            throw error;
+        }
         await this.notifyStudentOfMembership(classroom, student, 'adicionado-pelo-professor');
         return this.toMemberView(saved, student);
     }
@@ -469,8 +502,15 @@ export class ClassroomService {
         if (!invite) {
             throw new NotFoundException('Convite inválido');
         }
-        if (invite.expiresAt.getTime() < Date.now()) {
+        if (invite.expiresAt.getTime() <= Date.now()) {
             throw new BadRequestException('Convite expirado');
+        }
+
+        const student = await this.userRepository.findOne({
+            where: { id: userId, role: UserRoleEnum.STUDENT },
+        });
+        if (!student) {
+            throw new ForbiddenException('Aluno não encontrado ou sem permissão para entrar na turma');
         }
 
         const classroom = await this.classroomRepository.findOne({ where: { id: invite.classroomId } });
@@ -492,7 +532,14 @@ export class ClassroomService {
         member.classroomId = invite.classroomId;
         member.studentId = userId;
         member.status = ClassroomMemberStatusEnum.PENDING;
-        await this.memberRepository.save(member);
+        try {
+            await this.memberRepository.save(member);
+        } catch (error) {
+            if (this.isUniqueViolation(error)) {
+                throw new ConflictException('Você já é membro ou possui pedido pendente nesta turma');
+            }
+            throw error;
+        }
 
         await this.notifyTeacherOfJoinRequest(classroom, userId);
 

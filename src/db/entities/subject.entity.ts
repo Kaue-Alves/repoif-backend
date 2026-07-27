@@ -10,7 +10,7 @@ export class SubjectEntity {
     name!: string;
 
     @Column({ type: 'text', nullable: true })
-    description?: string;
+    description?: string | null;
 
     @Column({ type: 'uuid' })
     teacherId!: string;

@@ -28,11 +28,13 @@ export class ClassroomController {
         return await this.classroomService.create(dto, req.user.sub);
     }
 
+    @Roles(UserRoleEnum.TEACHER, UserRoleEnum.STUDENT)
     @Get()
     async list(@Query() query: PaginationQueryDto, @Req() req: any) {
         return await this.classroomService.listForUser(req.user.sub, req.user.role, query);
     }
 
+    @Roles(UserRoleEnum.TEACHER, UserRoleEnum.STUDENT)
     @Get(':id')
     async findOne(@Param('id') id: string, @Req() req: any) {
         return await this.classroomService.findOne(id, req.user.sub);
@@ -59,6 +61,7 @@ export class ClassroomController {
         return await this.classroomService.addSubject(id, dto, req.user.sub);
     }
 
+    @Roles(UserRoleEnum.TEACHER, UserRoleEnum.STUDENT)
     @Get(':id/subjects')
     async listSubjects(@Param('id') id: string, @Query() query: PaginationQueryDto, @Req() req: any) {
         return await this.classroomService.listSubjects(id, req.user.sub, query);
@@ -100,6 +103,7 @@ export class ClassroomController {
         return await this.classroomService.createInvite(id, req.user.sub, dto);
     }
 
+    @Roles(UserRoleEnum.STUDENT)
     @Post('join/:token')
     async joinByInvite(@Param('token') token: string, @Req() req: any) {
         return await this.classroomService.joinByInvite(token, req.user.sub, req.user.role);

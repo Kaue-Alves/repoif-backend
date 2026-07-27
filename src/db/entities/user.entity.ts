@@ -1,8 +1,10 @@
-import { Column, DeleteDateColumn, Entity, PrimaryGeneratedColumn } from "typeorm";
+import { Column, DeleteDateColumn, Entity, Index, PrimaryGeneratedColumn } from "typeorm";
 
 import { UserRoleEnum } from "src/common/enums/user-role.enum";
 
 @Entity({name: 'user'})
+@Index('user_un_username', ['username'], { unique: true })
+@Index('user_uq_email', ['email'], { unique: true })
 export class UserEntity {
 
     @PrimaryGeneratedColumn('uuid')

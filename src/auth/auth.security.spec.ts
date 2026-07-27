@@ -1,4 +1,4 @@
-import { INestApplication, UnauthorizedException } from '@nestjs/common';
+import { Controller, Get, INestApplication, UnauthorizedException } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
@@ -8,6 +8,14 @@ import request from 'supertest';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { configureSecurity, corsOrigin, THROTTLE_ERROR_MESSAGE, THROTTLER_OPTIONS } from 'src/common/security';
+
+@Controller('status')
+class StatusController {
+  @Get()
+  status() {
+    return { status: 'ok' };
+  }
+}
 
 /**
  * Monta o `AuthController` de verdade — com os `@Throttle` que ele declara — sobre
@@ -28,7 +36,7 @@ async function createApp(frontendUrl?: string, extraOrigins?: string): Promise<I
 
   const moduleRef = await Test.createTestingModule({
     imports: [ThrottlerModule.forRoot(THROTTLER_OPTIONS)],
-    controllers: [AuthController],
+    controllers: [AuthController, StatusController],
     providers: [
       { provide: AuthService, useValue: authServiceStub },
       { provide: APP_GUARD, useClass: ThrottlerGuard },
@@ -51,6 +59,19 @@ describe('Borda de segurança do /auth', () => {
   });
 
   describe('rate limit', () => {
+    it('QLT-04 permite 120 requisições em rota geral e bloqueia a 121ª', async () => {
+      app = await createApp();
+      const server = app.getHttpServer();
+
+      for (let i = 1; i <= 120; i++) {
+        expect((await request(server).get('/status')).status).toBe(200);
+      }
+
+      const bloqueada = await request(server).get('/status');
+      expect(bloqueada.status).toBe(429);
+      expect(bloqueada.body.message).toBe(THROTTLE_ERROR_MESSAGE);
+    });
+
     it('permite 5 tentativas de login e bloqueia a 6ª com 429', async () => {
       app = await createApp();
 

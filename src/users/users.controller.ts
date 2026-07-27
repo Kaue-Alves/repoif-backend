@@ -1,9 +1,12 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
-import { UserDto } from './users.dto';
+import { PublicUserDto, UserDto } from './users.dto';
 import { ChangePasswordDto, UpdateProfileDto } from './update-profile.dto';
 import { ListTeachersDto } from './list-teachers.dto';
 import { UsersService } from './users.service';
 import { AuthGuard } from 'src/auth/auth.guard';
+import { RolesGuard } from 'src/common/guards/roles.guard';
+import { Roles } from 'src/common/decorators/roles.decorator';
+import { UserRoleEnum } from 'src/common/enums/user-role.enum';
 
 @Controller('users')
 export class UsersController {
@@ -17,9 +20,10 @@ export class UsersController {
         return await this.userService.create(user);
     }
 
-    @UseGuards(AuthGuard)
+    @UseGuards(AuthGuard, RolesGuard)
+    @Roles(UserRoleEnum.ADMIN)
     @Get()
-    async findAllUsers(): Promise<UserDto[] | null> {
+    async findAllUsers(): Promise<PublicUserDto[]> {
         return await this.userService.findAllUsers();
     }
 

@@ -23,8 +23,8 @@ export class AssignmentsController {
 
     @Roles(UserRoleEnum.TEACHER)
     @Post('attachment/upload-url')
-    async requestAttachmentUploadUrl(@Body() dto: RequestAttachmentUploadUrlDto) {
-        return this.assignmentsService.requestAttachmentUploadUrl(dto);
+    async requestAttachmentUploadUrl(@Body() dto: RequestAttachmentUploadUrlDto, @Req() req: any) {
+        return this.assignmentsService.requestAttachmentUploadUrl(dto, req.user.sub);
     }
 
     @Roles(UserRoleEnum.TEACHER)

@@ -23,13 +23,20 @@ export class ReportsService {
         private readonly fileRepository: Repository<FileEntity>,
     ) {}
 
+    private isUniqueViolation(error: unknown): boolean {
+        const details = error as { code?: string; driverError?: { code?: string } };
+        return details?.code === '23505' || details?.driverError?.code === '23505';
+    }
+
     async create(dto: CreateReportDto, reporterId: string): Promise<ReportEntity> {
         let targetUserId: string | null = null;
         let targetFileId: string | null = null;
 
         if (dto.targetType === ReportTargetTypeEnum.USER) {
-            if (!dto.targetUserId) {
-                throw new BadRequestException('targetUserId é obrigatório para denúncias de usuário');
+            if (!dto.targetUserId || dto.targetFileId) {
+                throw new BadRequestException(
+                    'Denúncia de usuário exige somente targetUserId',
+                );
             }
 
             const target = await this.userRepository.findOne({ where: { id: dto.targetUserId } });
@@ -43,8 +50,10 @@ export class ReportsService {
 
             targetUserId = target.id;
         } else {
-            if (!dto.targetFileId) {
-                throw new BadRequestException('targetFileId é obrigatório para denúncias de arquivo');
+            if (!dto.targetFileId || dto.targetUserId) {
+                throw new BadRequestException(
+                    'Denúncia de arquivo exige somente targetFileId',
+                );
             }
 
             const target = await this.fileRepository.findOne({ where: { id: dto.targetFileId } });
@@ -78,7 +87,14 @@ export class ReportsService {
             status: ReportStatusEnum.PENDING,
         });
 
-        return this.reportRepository.save(report);
+        try {
+            return await this.reportRepository.save(report);
+        } catch (error) {
+            if (this.isUniqueViolation(error)) {
+                throw new ConflictException('Você já possui uma denúncia pendente para este alvo');
+            }
+            throw error;
+        }
     }
 
     async findMyReports(reporterId: string): Promise<ReportEntity[]> {

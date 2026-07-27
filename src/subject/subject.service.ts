@@ -1,13 +1,18 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { SubjectEntity } from 'src/db/entities/subject.entity';
-import { Repository } from 'typeorm';
-import { SubjectDto } from './subject.dto';
+import { DataSource, In, Repository } from 'typeorm';
+import { SubjectDto, UpdateSubjectDto } from './subject.dto';
 import { UserEntity } from 'src/db/entities/user.entity';
 import { UserRoleEnum } from 'src/common/enums/user-role.enum';
 import { ClassroomMemberStatusEnum } from 'src/common/enums/classroom-member-status.enum';
 import { ClassroomService } from 'src/classroom/classroom.service';
 import { buildPaginationMeta, Paginated, PaginationQueryDto } from 'src/common/dto/pagination-query.dto';
+import { FileEntity } from 'src/db/entities/file.entity';
+import { AssignmentEntity } from 'src/db/entities/assignment.entity';
+import { AssignmentSubmissionEntity } from 'src/db/entities/assignment-submission.entity';
+import { ClassroomSubjectEntity } from 'src/db/entities/classroom-subject.entity';
+import { StorageCleanupService } from 'src/storage-cleanup/storage-cleanup.service';
 
 @Injectable()
 export class SubjectService {
@@ -18,24 +23,44 @@ export class SubjectService {
         @InjectRepository(UserEntity)
         private readonly userRepository: Repository<UserEntity>,
 
-        private readonly classroomService: ClassroomService
+        @InjectRepository(FileEntity)
+        private readonly fileRepository: Repository<FileEntity>,
+
+        @InjectRepository(AssignmentEntity)
+        private readonly assignmentRepository: Repository<AssignmentEntity>,
+
+        @InjectRepository(AssignmentSubmissionEntity)
+        private readonly submissionRepository: Repository<AssignmentSubmissionEntity>,
+
+        @InjectRepository(ClassroomSubjectEntity)
+        private readonly classroomSubjectRepository: Repository<ClassroomSubjectEntity>,
+
+        private readonly classroomService: ClassroomService,
+        private readonly storageCleanupService: StorageCleanupService,
+        private readonly dataSource: DataSource,
     ) {}
-async create(subjectDto: SubjectDto, teacherId: string): Promise<SubjectEntity> {
 
-    const foundTeacher = await this.userRepository.findOne({ where: { id: teacherId, role: UserRoleEnum.TEACHER } });
-    if (!foundTeacher) {
-        throw new NotFoundException(`Teacher with ID ${teacherId} not found`);
+    async create(subjectDto: SubjectDto, teacherId: string): Promise<SubjectEntity> {
+        const foundTeacher = await this.userRepository.findOne({
+            where: { id: teacherId, role: UserRoleEnum.TEACHER },
+        });
+        if (!foundTeacher) {
+            throw new NotFoundException(`Teacher with ID ${teacherId} not found`);
+        }
+
+        const name = subjectDto.name.trim();
+        if (!name) {
+            throw new BadRequestException('O nome da disciplina é obrigatório');
+        }
+
+        const subject = new SubjectEntity();
+        subject.name = name;
+        subject.description = subjectDto.description?.trim() || null;
+        subject.teacherId = teacherId;
+        subject.isPublic = subjectDto.isPublic ?? false;
+
+        return this.subjectRepository.save(subject);
     }
-
-    const subject = new SubjectEntity();
-    subject.name = subjectDto.name;
-    subject.description = subjectDto.description;
-    subject.teacherId = teacherId;
-    subject.isPublic = subjectDto.isPublic ?? false;
-
-    return await this.subjectRepository.save(subject);
-}
-
 
     async findAll(teacherId: string, query: PaginationQueryDto): Promise<Paginated<SubjectEntity>> {
         const page = query.page ?? 1;
@@ -145,35 +170,57 @@ async create(subjectDto: SubjectDto, teacherId: string): Promise<SubjectEntity> 
         };
     }
 
-    async update(id: string, subjectDto: Partial<SubjectDto>, teacherId: string): Promise<SubjectEntity> {
+    async update(id: string, subjectDto: UpdateSubjectDto, teacherId: string): Promise<SubjectEntity> {
         const subject = await this.findOne(id, teacherId);
 
-        // Opcional: Validar se o professor que está tentando editar é o dono da disciplina
-        if (subject.teacherId !== teacherId) {
-            throw new NotFoundException(`Subject with ID ${id} not found for this teacher`);
+        if (subjectDto.name !== undefined) {
+            const name = subjectDto.name.trim();
+            if (!name) {
+                throw new BadRequestException('O nome da disciplina é obrigatório');
+            }
+            subject.name = name;
         }
-        
-        if (subjectDto.name) subject.name = subjectDto.name;
-        if (subjectDto.description) subject.description = subjectDto.description;
+        if (subjectDto.description !== undefined) {
+            subject.description = subjectDto.description.trim() || null;
+        }
         if (subjectDto.isPublic !== undefined) subject.isPublic = subjectDto.isPublic;
-        
-        // teacherId não é atualizado via body, ele é fixo do dono original ou alterado por lógica específica
-        // mas se quiser permitir trocar de professor (ex: admin), a lógica seria diferente.
 
-        return await this.subjectRepository.save(subject);
+        return this.subjectRepository.save(subject);
     }
 
     async remove(id: string, teacherId: string): Promise<void> {
-        const subject = await this.findOne(id, teacherId);
+        await this.findOne(id, teacherId);
 
-        if (subject.teacherId !== teacherId) {
-            throw new NotFoundException(`Subject with ID ${id} not found for this teacher`);
-        }
+        const [files, assignments] = await Promise.all([
+            this.fileRepository.find({ where: { subjectId: id }, withDeleted: true }),
+            this.assignmentRepository.find({ where: { subjectId: id } }),
+        ]);
+        const assignmentIds = assignments.map(item => item.id);
+        const submissions = assignmentIds.length
+            ? await this.submissionRepository.find({ where: { assignmentId: In(assignmentIds) } })
+            : [];
+        const keys = [...new Set<string>([
+            ...files.map(file => file.key),
+            ...assignments.map(item => item.attachmentKey).filter((key): key is string => !!key),
+            ...submissions.map(item => item.key),
+        ])];
 
-        const result = await this.subjectRepository.delete(id);
+        await this.dataSource.transaction(async manager => {
+            await this.storageCleanupService.enqueue(keys, manager);
+            if (assignmentIds.length) {
+                await manager.getRepository(AssignmentSubmissionEntity)
+                    .delete({ assignmentId: In(assignmentIds) });
+            }
+            await manager.getRepository(AssignmentEntity).delete({ subjectId: id });
+            await manager.getRepository(ClassroomSubjectEntity).delete({ subjectId: id });
+            await manager.getRepository(FileEntity).delete({ subjectId: id });
 
-        if (result.affected === 0) {
-            throw new NotFoundException(`Subject with ID ${id} not found`);
-        }
+            const result = await manager.getRepository(SubjectEntity).delete({ id, teacherId });
+            if (result.affected === 0) {
+                throw new NotFoundException(`Subject with ID ${id} not found`);
+            }
+        });
+
+        await this.storageCleanupService.processKeys(keys);
     }
 }

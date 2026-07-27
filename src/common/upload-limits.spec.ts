@@ -55,7 +55,7 @@ describe('Limite de upload', () => {
   /** Defesa em profundidade: o registro também não pode declarar mais de 200 MB. */
   describe('ao confirmar o upload', () => {
     const confirma = (size: number) => ({
-      key: 'k/1', originalName: 'aula.pdf', mimeType: 'application/pdf', size, subjectId: SUBJECT_ID,
+      uploadProof: 'proof', key: 'k/1', originalName: 'aula.pdf', mimeType: 'application/pdf', size, subjectId: SUBJECT_ID,
     });
 
     it('aceita 200 MB e recusa acima', () => {
@@ -66,12 +66,12 @@ describe('Limite de upload', () => {
 
   describe('vale para anexo de trabalho e entrega de aluno', () => {
     it('anexo do enunciado', () => {
-      const url = (size: number) => ({ filename: 'enunciado.pdf', contentType: 'application/pdf', size });
+      const url = (size: number) => ({ subjectId: SUBJECT_ID, filename: 'enunciado.pdf', contentType: 'application/pdf', size });
       expect(passa(RequestAttachmentUploadUrlDto, url(MAX_UPLOAD_BYTES))).toBe(true);
       expect(passa(RequestAttachmentUploadUrlDto, url(MAX_UPLOAD_BYTES + 1))).toBe(false);
 
       const anexo = (attachmentSize: number) => ({
-        attachmentKey: 'k/1', attachmentName: 'enunciado.pdf', attachmentMimeType: 'application/pdf', attachmentSize,
+        uploadProof: 'proof', attachmentKey: 'k/1', attachmentName: 'enunciado.pdf', attachmentMimeType: 'application/pdf', attachmentSize,
       });
       expect(passa(AttachmentDto, anexo(MAX_UPLOAD_BYTES))).toBe(true);
       expect(passa(AttachmentDto, anexo(MAX_UPLOAD_BYTES + 1))).toBe(false);
@@ -82,7 +82,7 @@ describe('Limite de upload', () => {
       expect(passa(RequestSubmissionUploadUrlDto, url(MAX_UPLOAD_BYTES))).toBe(true);
       expect(passa(RequestSubmissionUploadUrlDto, url(MAX_UPLOAD_BYTES + 1))).toBe(false);
 
-      const confirma = (size: number) => ({ key: 'k/1', originalName: 'trabalho.pdf', mimeType: 'application/pdf', size });
+      const confirma = (size: number) => ({ uploadProof: 'proof', key: 'k/1', originalName: 'trabalho.pdf', mimeType: 'application/pdf', size });
       expect(passa(ConfirmSubmissionDto, confirma(MAX_UPLOAD_BYTES))).toBe(true);
       expect(passa(ConfirmSubmissionDto, confirma(MAX_UPLOAD_BYTES + 1))).toBe(false);
     });

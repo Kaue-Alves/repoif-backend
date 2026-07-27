@@ -31,6 +31,10 @@ export class RequestUploadUrlDto {
 
 export class ConfirmUploadDto {
     @IsString()
+    @MaxLength(2048)
+    uploadProof!: string;
+
+    @IsString()
     @MaxLength(512)
     key!: string;
 

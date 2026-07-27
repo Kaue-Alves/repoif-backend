@@ -7,8 +7,8 @@ import { TypeOrmModule } from '@nestjs/typeorm';
         useFactory: async (ConfigService: ConfigService) => ({
             type: 'postgres',
             url: ConfigService.get<string>('DATABASE_URL'),
-            entities: [__dirname + '/entities/**'],
-            migrations: [__dirname + '/migrations/*.ts'],
+            entities: [__dirname + '/entities/**/*{.ts,.js}'],
+            migrations: [__dirname + '/migrations/*{.ts,.js}'],
             synchronize: false,
             ssl: { rejectUnauthorized: false }
         }),

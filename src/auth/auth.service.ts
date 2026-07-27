@@ -51,18 +51,21 @@ export class AuthService {
     }
     
     async signIn(username: string, email: string, password: string): Promise<AuthResponseDto> {
+        const normalizedUsername = username?.trim();
+        const normalizedEmail = email?.trim();
+        const normalizedPassword = password?.trim();
 
-        if (!username && !email) {
+        if ((!normalizedUsername && !normalizedEmail) || !normalizedPassword) {
             throw new UnauthorizedException(INVALID_CREDENTIALS_MESSAGE);
         }
 
-        const foundUser = username
-            ? await this.usersService.findByUsername(username.trim())
-            : await this.usersService.findByEmail(email.trim());
+        const foundUser = normalizedUsername
+            ? await this.usersService.findByUsername(normalizedUsername)
+            : await this.usersService.findByEmail(normalizedEmail);
 
         // Mensagem única para usuário inexistente e senha errada: dizer qual dos dois
         // falhou entregaria de brinde quais contas existem.
-        if (!foundUser || !compareSync(password.trim(), foundUser.password)) {
+        if (!foundUser || !compareSync(normalizedPassword, foundUser.password)) {
             throw new UnauthorizedException(INVALID_CREDENTIALS_MESSAGE);
         }
 

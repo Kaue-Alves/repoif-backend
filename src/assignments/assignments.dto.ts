@@ -6,6 +6,10 @@ import { MAX_UPLOAD_BYTES, MAX_UPLOAD_MESSAGE } from 'src/common/upload-limits';
 /** Metadados de um anexo já enviado ao R2 (key obtida via upload-url). */
 export class AttachmentDto {
     @IsString()
+    @MaxLength(2048)
+    uploadProof!: string;
+
+    @IsString()
     @MaxLength(512)
     attachmentKey!: string;
 
@@ -73,6 +77,9 @@ export class UpdateAssignmentDto {
 }
 
 export class RequestAttachmentUploadUrlDto {
+    @IsUUID()
+    subjectId!: string;
+
     @IsString()
     @MaxLength(255)
     @IsSafeFilename()
@@ -105,6 +112,10 @@ export class RequestSubmissionUploadUrlDto {
 }
 
 export class ConfirmSubmissionDto {
+    @IsString()
+    @MaxLength(2048)
+    uploadProof!: string;
+
     @IsString()
     @MaxLength(512)
     key!: string;

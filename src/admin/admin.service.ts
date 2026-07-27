@@ -50,7 +50,7 @@ export class AdminService {
     ) {}
 
     private buildMeta(page: number, limit: number, total: number): PaginationMeta {
-        const totalPages = Math.ceil(total / limit) || 1;
+        const totalPages = Math.ceil(total / limit);
         return {
             page,
             limit,
@@ -70,6 +70,11 @@ export class AdminService {
             emailVerified: user.emailVerified,
             deletedAt: user.deletedAt ?? null,
         };
+    }
+
+    private isUniqueViolation(error: unknown): boolean {
+        const details = error as { code?: string; driverError?: { code?: string } };
+        return details?.code === '23505' || details?.driverError?.code === '23505';
     }
 
     // ---------------------------------------------------------------- USERS
@@ -109,7 +114,13 @@ export class AdminService {
 
     async createUser(dto: CreateUserByAdminDto) {
         const username = dto.username.trim();
-        const email = dto.email.trim();
+        const email = dto.email.trim().toLowerCase();
+        if (!username) {
+            throw new BadRequestException('Username não pode ficar vazio');
+        }
+        if (!dto.password.trim()) {
+            throw new BadRequestException('Senha não pode ficar vazia');
+        }
 
         const existing = await this.userRepository.findOne({
             where: [{ username }, { email }],
@@ -123,12 +134,20 @@ export class AdminService {
         const user = this.userRepository.create({
             username,
             email,
-            password: hashSync(dto.password.trim(), 10),
+            password: hashSync(dto.password, 10),
             role: dto.role,
             emailVerified: true, // criado pelo admin já entra verificado
         });
 
-        const saved = await this.userRepository.save(user);
+        let saved: UserEntity;
+        try {
+            saved = await this.userRepository.save(user);
+        } catch (error) {
+            if (this.isUniqueViolation(error)) {
+                throw new ConflictException('Já existe um usuário com este username ou email');
+            }
+            throw error;
+        }
         return this.sanitizeUser(saved);
     }
 
@@ -228,8 +247,8 @@ export class AdminService {
         }
 
         if (hard) {
-            // Remoção definitiva: apaga o objeto do R2 e o registro.
-            await this.r2Service.deleteObject(file.key).catch(() => {});
+            // Se o R2 falhar, preserva o registro para permitir nova tentativa e auditoria.
+            await this.r2Service.deleteObject(file.key);
             await this.fileRepository.delete(id);
             return { id, deleted: true, hard: true };
         }

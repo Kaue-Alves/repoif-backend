@@ -1,11 +1,8 @@
-import { IsDate, IsOptional, IsString, IsUUID, MaxLength } from "class-validator";
+import { IsBoolean, IsOptional, IsString, MaxLength, MinLength } from "class-validator";
 
 export class SubjectDto {
-    @IsUUID()
-    @IsOptional()
-    id!: string;
-
     @IsString()
+    @MinLength(1)
     @MaxLength(255)
     name!: string;
 
@@ -13,18 +10,23 @@ export class SubjectDto {
     @IsOptional()
     description?: string;
 
-    @IsUUID()
-    @IsOptional()
-    teacherId!: string;
-
+    @IsBoolean()
     @IsOptional()
     isPublic?: boolean;
+}
 
-    @IsDate()
+export class UpdateSubjectDto {
+    @IsString()
+    @MinLength(1)
+    @MaxLength(255)
     @IsOptional()
-    createdAt!: Date;
+    name?: string;
 
-    @IsDate()
+    @IsString()
     @IsOptional()
-    updatedAt!: Date;
+    description?: string;
+
+    @IsBoolean()
+    @IsOptional()
+    isPublic?: boolean;
 }

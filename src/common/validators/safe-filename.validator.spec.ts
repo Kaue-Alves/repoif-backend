@@ -69,7 +69,7 @@ describe('@IsSafeFilename() nos DTOs de upload', () => {
    */
   it('recusa executável ao confirmar o upload', () => {
     const confirm = (originalName: string) => ({
-      key: 'k/1', originalName, mimeType: 'application/pdf', size: 1, subjectId: SUBJECT_ID,
+      uploadProof: 'proof', key: 'k/1', originalName, mimeType: 'application/pdf', size: 1, subjectId: SUBJECT_ID,
     });
     expect(passa(ConfirmUploadDto, confirm('aula.pdf'))).toBe(true);
     expect(passa(ConfirmUploadDto, confirm('a.exe'))).toBe(false);
@@ -84,7 +84,7 @@ describe('@IsSafeFilename() nos DTOs de upload', () => {
     expect(passa(RequestSubmissionUploadUrlDto, { filename: 'trabalho.pdf', contentType: 'application/pdf', size: 1024 })).toBe(true);
     expect(passa(RequestSubmissionUploadUrlDto, { filename: 'trabalho.exe', contentType: 'application/pdf', size: 1024 })).toBe(false);
 
-    const confirm = (originalName: string) => ({ key: 'k/1', originalName, mimeType: 'application/pdf', size: 1024 });
+    const confirm = (originalName: string) => ({ uploadProof: 'proof', key: 'k/1', originalName, mimeType: 'application/pdf', size: 1024 });
     expect(passa(ConfirmSubmissionDto, confirm('trabalho.pdf'))).toBe(true);
     expect(passa(ConfirmSubmissionDto, confirm('trabalho.pdf.exe'))).toBe(false);
   });

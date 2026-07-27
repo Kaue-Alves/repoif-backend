@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { UserDto } from './users.dto';
+import { PublicUserDto, UserDto } from './users.dto';
 import { ChangePasswordDto, UpdateProfileDto } from './update-profile.dto';
 import { compareSync, hashSync } from 'bcrypt';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -203,31 +203,45 @@ export class UsersService {
     }
 
     async create(newUser: UserDto) {
+        const username = newUser.username.trim();
+        const email = newUser.email.trim();
 
-        const existingUser = await this.usersRepository.findOne({ where: { username: newUser.username.trim() } })
+        // O papel ADMIN só pode ser concedido pelo módulo administrativo.
+        if (newUser.role === UserRoleEnum.ADMIN) {
+            throw new BadRequestException('O papel ADMIN não é permitido no cadastro público');
+        }
 
+        // Conta não verificada continua pertencendo a quem controla o e-mail original.
+        // O fluxo correto para ela é o reenvio de verificação, nunca a sobrescrita.
+        const existingUser = await this.usersRepository.findOne({
+            where: [{ username }, { email }],
+            withDeleted: true,
+        });
         if (existingUser) {
-            if (existingUser.emailVerified) {
-                throw new ConflictException(`O username "${newUser.username}" já está em uso`)
-            }
-
-            // Conta existe mas não foi verificada: corrige o email e reenvia o token
-            existingUser.email = newUser.email.trim()
-            existingUser.password = hashSync(newUser.password.trim(), 10)
-            await this.usersRepository.save(existingUser)
-
-            await this.issueEmailVerification(existingUser)
-
-            return { id: existingUser.id, username: existingUser.username }
+            throw new ConflictException('Já existe um usuário com este username ou e-mail');
         }
 
         const dbUser = new UserEntity()
-        dbUser.username = newUser.username.trim()
-        dbUser.email = newUser.email.trim()
+        dbUser.username = username
+        dbUser.email = email
         dbUser.password = hashSync(newUser.password.trim(), 10)
         dbUser.role = newUser.role
+        dbUser.emailVerified = false
 
-        const {id, username, email} = await this.usersRepository.save(dbUser)
+        let savedUser: UserEntity;
+        try {
+            savedUser = await this.usersRepository.save(dbUser);
+        } catch (error) {
+            // A consulta anterior melhora a mensagem, mas o índice do banco é a proteção
+            // definitiva contra dois cadastros concorrentes.
+            const details = error as { code?: string; driverError?: { code?: string } };
+            if (details.code === '23505' || details.driverError?.code === '23505') {
+                throw new ConflictException('Já existe um usuário com este username ou e-mail');
+            }
+            throw error;
+        }
+
+        const { id } = savedUser;
 
         await this.issueEmailVerification({ id, username, email })
 
@@ -256,8 +270,14 @@ export class UsersService {
         await this.issueEmailVerification(user);
     }
 
-    async findAllUsers(): Promise<UserDto[] | null> {
-        return await this.usersRepository.find()
+    async findAllUsers(): Promise<PublicUserDto[]> {
+        const users = await this.usersRepository.find();
+        return users.map(user => ({
+            id: user.id,
+            username: user.username,
+            name: user.name ?? null,
+            role: user.role,
+        }));
     }
 
     async searchTeachers(query: string, requester: RequestingUser): Promise<{ id: string; username: string; role: string }[]> {
